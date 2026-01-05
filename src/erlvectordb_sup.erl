@@ -27,6 +27,34 @@ init([]) ->
                  period => 1},
     
     ChildSpecs = [
+        #{id => cluster_manager,
+          start => {cluster_manager, start_link, []},
+          restart => permanent,
+          shutdown => 5000,
+          type => worker,
+          modules => [cluster_manager]},
+          
+        #{id => oauth_server,
+          start => {oauth_server, start_link, []},
+          restart => permanent,
+          shutdown => 5000,
+          type => worker,
+          modules => [oauth_server]},
+          
+        #{id => oauth_http_handler,
+          start => {oauth_http_handler, start_link, []},
+          restart => permanent,
+          shutdown => 5000,
+          type => worker,
+          modules => [oauth_http_handler]},
+          
+        #{id => rest_api_server,
+          start => {rest_api_server, start_link, []},
+          restart => permanent,
+          shutdown => 5000,
+          type => worker,
+          modules => [rest_api_server]},
+        
         #{id => vector_store_sup,
           start => {vector_store_sup, start_link, []},
           restart => permanent,

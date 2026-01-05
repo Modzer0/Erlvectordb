@@ -16,7 +16,7 @@
 -export([start_link/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
--export([save_vector/4, load_vectors/1, delete_vector/2, 
+-export([save_vector/4, save_compressed_vector/4, load_vectors/1, delete_vector/2, 
          get_store_info/1, sync/1, close_store/1]).
 
 -record(state, {
@@ -30,9 +30,10 @@
 
 -record(vector_record, {
     id :: binary(),
-    vector :: [float()],
+    vector :: [float()] | compressed_vector(),
     metadata :: map(),
-    timestamp :: integer()
+    timestamp :: integer(),
+    compressed = false :: boolean()
 }).
 
 -record(store_info, {
@@ -49,6 +50,9 @@ start_link(StoreName) ->
 
 save_vector(StoreName, VectorId, Vector, Metadata) ->
     gen_server:call(persistence_name(StoreName), {save_vector, VectorId, Vector, Metadata}).
+
+save_compressed_vector(StoreName, VectorId, CompressedVector, Metadata) ->
+    gen_server:call(persistence_name(StoreName), {save_compressed_vector, VectorId, CompressedVector, Metadata}).
 
 load_vectors(StoreName) ->
     gen_server:call(persistence_name(StoreName), load_vectors).
@@ -97,12 +101,47 @@ init([StoreName]) ->
     end.
 
 handle_call({save_vector, VectorId, Vector, Metadata}, _From, State) ->
+    CompressionEnabled = application:get_env(erlvectordb, compression_enabled, false),
+    
+    {FinalVector, IsCompressed} = case CompressionEnabled of
+        true ->
+            Algorithm = application:get_env(erlvectordb, compression_algorithm, quantization_8bit),
+            case vector_compression:compress_vector(Vector, Algorithm) of
+                {ok, CompressedVector} ->
+                    {CompressedVector, true};
+                {error, _Reason} ->
+                    % Fallback to uncompressed if compression fails
+                    {Vector, false}
+            end;
+        false ->
+            {Vector, false}
+    end,
+    
     Timestamp = erlang:system_time(millisecond),
     Record = #vector_record{
         id = VectorId,
-        vector = Vector,
+        vector = FinalVector,
         metadata = Metadata,
-        timestamp = Timestamp
+        timestamp = Timestamp,
+        compressed = IsCompressed
+    },
+    
+    % Save to ETS for fast access
+    true = ets:insert(State#state.ets_table, Record),
+    
+    % Mark as dirty for next sync
+    NewState = State#state{dirty = true},
+    
+    {reply, ok, NewState};
+
+handle_call({save_compressed_vector, VectorId, CompressedVector, Metadata}, _From, State) ->
+    Timestamp = erlang:system_time(millisecond),
+    Record = #vector_record{
+        id = VectorId,
+        vector = CompressedVector,
+        metadata = Metadata,
+        timestamp = Timestamp,
+        compressed = true
     },
     
     % Save to ETS for fast access
@@ -116,9 +155,10 @@ handle_call({save_vector, VectorId, Vector, Metadata}, _From, State) ->
 handle_call(load_vectors, _From, State) ->
     Vectors = ets:tab2list(State#state.ets_table),
     VectorMap = maps:from_list([{R#vector_record.id, 
-                                #{vector => R#vector_record.vector,
+                                #{vector => decompress_if_needed(R#vector_record.vector, R#vector_record.compressed),
                                   metadata => R#vector_record.metadata,
-                                  timestamp => R#vector_record.timestamp}} 
+                                  timestamp => R#vector_record.timestamp,
+                                  compressed => R#vector_record.compressed}} 
                                || R <- Vectors]),
     {reply, {ok, VectorMap}, State};
 
@@ -225,4 +265,15 @@ sync_to_dets(State) ->
         Error:Reason ->
             error_logger:error_msg("Sync to DETS failed: ~p:~p~n", [Error, Reason]),
             {error, {sync_failed, Reason}}
+    end.
+
+%% Compression helper functions
+decompress_if_needed(Vector, false) ->
+    Vector;
+decompress_if_needed(CompressedVector, true) ->
+    case vector_compression:decompress_vector(CompressedVector, #{}) of
+        {ok, Vector} -> Vector;
+        {error, _Reason} -> 
+            error_logger:warning_msg("Failed to decompress vector, returning compressed data~n"),
+            CompressedVector
     end.

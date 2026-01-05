@@ -71,10 +71,25 @@ handle_client(Socket) ->
         {ok, Data} ->
             try
                 Request = jsx:decode(Data, [return_maps]),
-                Response = process_mcp_request(Request),
-                ResponseJson = jsx:encode(Response),
-                gen_tcp:send(Socket, ResponseJson),
-                handle_client(Socket)
+                % Check for authentication
+                case authenticate_mcp_request(Request) of
+                    {ok, ClientInfo} ->
+                        Response = process_mcp_request(Request, ClientInfo),
+                        ResponseJson = jsx:encode(Response),
+                        gen_tcp:send(Socket, ResponseJson),
+                        handle_client(Socket);
+                    {error, auth_error} ->
+                        ErrorResponse = #{
+                            <<"jsonrpc">> => <<"2.0">>,
+                            <<"error">> => #{
+                                <<"code">> => -32001,
+                                <<"message">> => <<"Authentication required">>,
+                                <<"data">> => <<"Valid OAuth 2.1 token required">>
+                            },
+                            <<"id">> => maps:get(<<"id">>, Request, null)
+                        },
+                        gen_tcp:send(Socket, jsx:encode(ErrorResponse))
+                end
             catch
                 _:Error ->
                     ErrorResponse = #{
@@ -95,7 +110,7 @@ handle_client(Socket) ->
     end,
     gen_tcp:close(Socket).
 
-process_mcp_request(#{<<"method">> := <<"initialize">>, <<"id">> := Id}) ->
+process_mcp_request(#{<<"method">> := <<"initialize">>, <<"id">> := Id}, _ClientInfo) ->
     #{
         <<"jsonrpc">> => <<"2.0">>,
         <<"result">> => #{
@@ -106,14 +121,26 @@ process_mcp_request(#{<<"method">> := <<"initialize">>, <<"id">> := Id}) ->
             },
             <<"serverInfo">> => #{
                 <<"name">> => <<"erlvectordb">>,
-                <<"version">> => <<"0.1.0">>
+                <<"version">> => <<"0.1.0">>,
+                <<"authentication">> => #{
+                    <<"type">> => <<"oauth2.1">>,
+                    <<"token_endpoint">> => <<"http://localhost:8081/oauth/token">>,
+                    <<"scopes">> => [<<"read">>, <<"write">>, <<"admin">>]
+                }
             }
         },
         <<"id">> => Id
     };
 
-process_mcp_request(#{<<"method">> := <<"tools/list">>, <<"id">> := Id}) ->
-    Tools = [
+process_mcp_request(#{<<"method">> := <<"tools/list">>, <<"id">> := Id}, ClientInfo) ->
+    % Filter tools based on client scopes
+    AllTools = get_all_tools(),
+    FilteredTools = filter_tools_by_scopes(AllTools, maps:get(scopes, ClientInfo, [])),
+    #{
+        <<"jsonrpc">> => <<"2.0">>,
+        <<"result">> => #{<<"tools">> => FilteredTools},
+        <<"id">> => Id
+    };
         #{
             <<"name">> => <<"create_store">>,
             <<"description">> => <<"Create a new vector store">>,
@@ -209,15 +236,30 @@ process_mcp_request(#{<<"method">> := <<"tools/list">>, <<"id">> := Id}) ->
         <<"id">> => Id
     };
 
-process_mcp_request(#{<<"method">> := <<"tools/call">>, <<"params">> := Params, <<"id">> := Id}) ->
-    Result = handle_tool_call(Params),
-    #{
-        <<"jsonrpc">> => <<"2.0">>,
-        <<"result">> => Result,
-        <<"id">> => Id
-    };
+process_mcp_request(#{<<"method">> := <<"tools/call">>, <<"params">> := Params, <<"id">> := Id}, ClientInfo) ->
+    % Check if client has permission for this tool
+    ToolName = maps:get(<<"name">>, Params),
+    case check_tool_permission(ToolName, maps:get(scopes, ClientInfo, [])) of
+        true ->
+            Result = handle_tool_call(Params),
+            #{
+                <<"jsonrpc">> => <<"2.0">>,
+                <<"result">> => Result,
+                <<"id">> => Id
+            };
+        false ->
+            #{
+                <<"jsonrpc">> => <<"2.0">>,
+                <<"error">> => #{
+                    <<"code">> => -32002,
+                    <<"message">> => <<"Insufficient permissions">>,
+                    <<"data">> => <<"Client does not have required scopes for this tool">>
+                },
+                <<"id">> => Id
+            }
+    end;
 
-process_mcp_request(#{<<"id">> := Id}) ->
+process_mcp_request(#{<<"id">> := Id}, _ClientInfo) ->
     #{
         <<"jsonrpc">> => <<"2.0">>,
         <<"error">> => #{
@@ -227,7 +269,28 @@ process_mcp_request(#{<<"id">> := Id}) ->
         <<"id">> => Id
     }.
 
-handle_tool_call(#{<<"name">> := <<"create_store">>, <<"arguments">> := Args}) ->
+%% Authentication functions
+authenticate_mcp_request(Request) ->
+    case application:get_env(erlvectordb, oauth_enabled, true) of
+        false ->
+            % OAuth disabled, allow all requests
+            {ok, #{client_id => <<"anonymous">>, scopes => [<<"read">>, <<"write">>, <<"admin">>]}};
+        true ->
+            case maps:get(<<"auth">>, Request, undefined) of
+                undefined ->
+                    {error, auth_error};
+                #{<<"type">> := <<"bearer">>, <<"token">> := Token} ->
+                    case oauth_server:validate_token(Token) of
+                        {ok, ClientInfo} -> {ok, ClientInfo};
+                        {error, _} -> {error, auth_error}
+                    end;
+                _ ->
+                    {error, auth_error}
+            end
+    end.
+
+%% Tool permission functions
+get_all_tools() ->
     StoreName = binary_to_atom(maps:get(<<"name">>, Args), utf8),
     case vector_store_sup:start_store(StoreName) of
         {ok, _Pid} ->
@@ -316,3 +379,151 @@ handle_tool_call(#{<<"name">> := <<"list_backups">>, <<"arguments">> := _Args}) 
 
 handle_tool_call(_) ->
     #{<<"isError">> => true, <<"content">> => [#{<<"type">> => <<"text">>, <<"text">> => <<"Unknown tool">>}]}.
+
+%% Authentication functions
+authenticate_mcp_request(Request) ->
+    case application:get_env(erlvectordb, oauth_enabled, true) of
+        false ->
+            % OAuth disabled, allow all requests
+            {ok, #{client_id => <<"anonymous">>, scopes => [<<"read">>, <<"write">>, <<"admin">>]}};
+        true ->
+            case maps:get(<<"auth">>, Request, undefined) of
+                undefined ->
+                    {error, auth_error};
+                #{<<"type">> := <<"bearer">>, <<"token">> := Token} ->
+                    case oauth_server:validate_token(Token) of
+                        {ok, ClientInfo} -> {ok, ClientInfo};
+                        {error, _} -> {error, auth_error}
+                    end;
+                _ ->
+                    {error, auth_error}
+            end
+    end.
+
+%% Tool permission functions
+get_all_tools() ->
+    [
+        #{
+            <<"name">> => <<"create_store">>,
+            <<"description">> => <<"Create a new vector store">>,
+            <<"required_scopes">> => [<<"write">>],
+            <<"inputSchema">> => #{
+                <<"type">> => <<"object">>,
+                <<"properties">> => #{
+                    <<"name">> => #{<<"type">> => <<"string">>}
+                },
+                <<"required">> => [<<"name">>]
+            }
+        },
+        #{
+            <<"name">> => <<"insert_vector">>,
+            <<"description">> => <<"Insert a vector into a store">>,
+            <<"required_scopes">> => [<<"write">>],
+            <<"inputSchema">> => #{
+                <<"type">> => <<"object">>,
+                <<"properties">> => #{
+                    <<"store">> => #{<<"type">> => <<"string">>},
+                    <<"id">> => #{<<"type">> => <<"string">>},
+                    <<"vector">> => #{
+                        <<"type">> => <<"array">>,
+                        <<"items">> => #{<<"type">> => <<"number">>}
+                    },
+                    <<"metadata">> => #{<<"type">> => <<"object">>}
+                },
+                <<"required">> => [<<"store">>, <<"id">>, <<"vector">>]
+            }
+        },
+        #{
+            <<"name">> => <<"search_vectors">>,
+            <<"description">> => <<"Search for similar vectors">>,
+            <<"required_scopes">> => [<<"read">>],
+            <<"inputSchema">> => #{
+                <<"type">> => <<"object">>,
+                <<"properties">> => #{
+                    <<"store">> => #{<<"type">> => <<"string">>},
+                    <<"vector">> => #{
+                        <<"type">> => <<"array">>,
+                        <<"items">> => #{<<"type">> => <<"number">>}
+                    },
+                    <<"k">> => #{<<"type">> => <<"integer">>, <<"default">> => 10}
+                },
+                <<"required">> => [<<"store">>, <<"vector">>]
+            }
+        },
+        #{
+            <<"name">> => <<"sync_store">>,
+            <<"description">> => <<"Sync a vector store to persistent storage">>,
+            <<"required_scopes">> => [<<"write">>],
+            <<"inputSchema">> => #{
+                <<"type">> => <<"object">>,
+                <<"properties">> => #{
+                    <<"store">> => #{<<"type">> => <<"string">>}
+                },
+                <<"required">> => [<<"store">>]
+            }
+        },
+        #{
+            <<"name">> => <<"backup_store">>,
+            <<"description">> => <<"Create a backup of a vector store">>,
+            <<"required_scopes">> => [<<"admin">>],
+            <<"inputSchema">> => #{
+                <<"type">> => <<"object">>,
+                <<"properties">> => #{
+                    <<"store">> => #{<<"type">> => <<"string">>},
+                    <<"backup_name">> => #{<<"type">> => <<"string">>}
+                },
+                <<"required">> => [<<"store">>, <<"backup_name">>]
+            }
+        },
+        #{
+            <<"name">> => <<"restore_store">>,
+            <<"description">> => <<"Restore a vector store from backup">>,
+            <<"required_scopes">> => [<<"admin">>],
+            <<"inputSchema">> => #{
+                <<"type">> => <<"object">>,
+                <<"properties">> => #{
+                    <<"backup_path">> => #{<<"type">> => <<"string">>},
+                    <<"new_store_name">> => #{<<"type">> => <<"string">>}
+                },
+                <<"required">> => [<<"backup_path">>, <<"new_store_name">>]
+            }
+        },
+        #{
+            <<"name">> => <<"list_backups">>,
+            <<"description">> => <<"List all available backups">>,
+            <<"required_scopes">> => [<<"admin">>],
+            <<"inputSchema">> => #{
+                <<"type">> => <<"object">>,
+                <<"properties">> => #{},
+                <<"required">> => []
+            }
+        }
+    ].
+
+filter_tools_by_scopes(Tools, ClientScopes) ->
+    lists:filtermap(fun(Tool) ->
+        RequiredScopes = maps:get(<<"required_scopes">>, Tool, []),
+        case has_required_scopes(RequiredScopes, ClientScopes) of
+            true ->
+                % Remove required_scopes from the tool definition for client
+                CleanTool = maps:remove(<<"required_scopes">>, Tool),
+                {true, CleanTool};
+            false ->
+                false
+        end
+    end, Tools).
+
+check_tool_permission(ToolName, ClientScopes) ->
+    AllTools = get_all_tools(),
+    case lists:keyfind(ToolName, 2, [{maps:get(<<"name">>, T), T} || T <- AllTools]) of
+        {ToolName, Tool} ->
+            RequiredScopes = maps:get(<<"required_scopes">>, Tool, []),
+            has_required_scopes(RequiredScopes, ClientScopes);
+        false ->
+            false
+    end.
+
+has_required_scopes(RequiredScopes, ClientScopes) ->
+    lists:any(fun(RequiredScope) ->
+        lists:member(RequiredScope, ClientScopes)
+    end, RequiredScopes).
