@@ -157,6 +157,50 @@ process_mcp_request(#{<<"method">> := <<"tools/list">>, <<"id">> := Id}) ->
                 },
                 <<"required">> => [<<"store">>, <<"vector">>]
             }
+        },
+        #{
+            <<"name">> => <<"sync_store">>,
+            <<"description">> => <<"Sync a vector store to persistent storage">>,
+            <<"inputSchema">> => #{
+                <<"type">> => <<"object">>,
+                <<"properties">> => #{
+                    <<"store">> => #{<<"type">> => <<"string">>}
+                },
+                <<"required">> => [<<"store">>]
+            }
+        },
+        #{
+            <<"name">> => <<"backup_store">>,
+            <<"description">> => <<"Create a backup of a vector store">>,
+            <<"inputSchema">> => #{
+                <<"type">> => <<"object">>,
+                <<"properties">> => #{
+                    <<"store">> => #{<<"type">> => <<"string">>},
+                    <<"backup_name">> => #{<<"type">> => <<"string">>}
+                },
+                <<"required">> => [<<"store">>, <<"backup_name">>]
+            }
+        },
+        #{
+            <<"name">> => <<"restore_store">>,
+            <<"description">> => <<"Restore a vector store from backup">>,
+            <<"inputSchema">> => #{
+                <<"type">> => <<"object">>,
+                <<"properties">> => #{
+                    <<"backup_path">> => #{<<"type">> => <<"string">>},
+                    <<"new_store_name">> => #{<<"type">> => <<"string">>}
+                },
+                <<"required">> => [<<"backup_path">>, <<"new_store_name">>]
+            }
+        },
+        #{
+            <<"name">> => <<"list_backups">>,
+            <<"description">> => <<"List all available backups">>,
+            <<"inputSchema">> => #{
+                <<"type">> => <<"object">>,
+                <<"properties">> => #{},
+                <<"required">> => []
+            }
         }
     ],
     #{
@@ -214,6 +258,57 @@ handle_tool_call(#{<<"name">> := <<"search_vectors">>, <<"arguments">> := Args})
     case vector_store:search(StoreName, QueryVector, K) of
         {ok, Results} ->
             ResultsJson = jsx:encode(Results),
+            #{<<"content">> => [#{<<"type">> => <<"text">>, <<"text">> => ResultsJson}]};
+        {error, Reason} ->
+            #{<<"isError">> => true, <<"content">> => [#{<<"type">> => <<"text">>, <<"text">> => io_lib:format("Error: ~p", [Reason])}]}
+    end;
+
+handle_tool_call(#{<<"name">> := <<"sync_store">>, <<"arguments">> := Args}) ->
+    StoreName = binary_to_atom(maps:get(<<"store">>, Args), utf8),
+    
+    case vector_store:sync(StoreName) of
+        ok ->
+            #{<<"content">> => [#{<<"type">> => <<"text">>, <<"text">> => <<"Store synced successfully">>}]};
+        {error, Reason} ->
+            #{<<"isError">> => true, <<"content">> => [#{<<"type">> => <<"text">>, <<"text">> => io_lib:format("Error: ~p", [Reason])}]}
+    end;
+
+handle_tool_call(#{<<"name">> := <<"backup_store">>, <<"arguments">> := Args}) ->
+    StoreName = binary_to_atom(maps:get(<<"store">>, Args), utf8),
+    BackupName = binary_to_list(maps:get(<<"backup_name">>, Args)),
+    
+    case vector_backup:backup_store(StoreName, BackupName) of
+        {ok, BackupInfo} ->
+            Response = io_lib:format("Backup created successfully: ~s", [BackupInfo#backup_info.file_path]),
+            #{<<"content">> => [#{<<"type">> => <<"text">>, <<"text">> => list_to_binary(Response)}]};
+        {error, Reason} ->
+            #{<<"isError">> => true, <<"content">> => [#{<<"type">> => <<"text">>, <<"text">> => io_lib:format("Error: ~p", [Reason])}]}
+    end;
+
+handle_tool_call(#{<<"name">> := <<"restore_store">>, <<"arguments">> := Args}) ->
+    BackupPath = binary_to_list(maps:get(<<"backup_path">>, Args)),
+    NewStoreName = binary_to_atom(maps:get(<<"new_store_name">>, Args), utf8),
+    
+    case vector_backup:restore_store(BackupPath, NewStoreName) of
+        {ok, Result} ->
+            VectorsRestored = maps:get(vectors_restored, Result),
+            Response = io_lib:format("Store restored successfully. Vectors restored: ~p", [VectorsRestored]),
+            #{<<"content">> => [#{<<"type">> => <<"text">>, <<"text">> => list_to_binary(Response)}]};
+        {error, Reason} ->
+            #{<<"isError">> => true, <<"content">> => [#{<<"type">> => <<"text">>, <<"text">> => io_lib:format("Error: ~p", [Reason])}]}
+    end;
+
+handle_tool_call(#{<<"name">> := <<"list_backups">>, <<"arguments">> := _Args}) ->
+    case vector_backup:list_backups() of
+        {ok, Backups} ->
+            BackupList = [#{
+                <<"store_name">> => atom_to_binary(B#backup_info.store_name, utf8),
+                <<"timestamp">> => B#backup_info.timestamp,
+                <<"file_path">> => list_to_binary(B#backup_info.file_path),
+                <<"vector_count">> => B#backup_info.vector_count,
+                <<"dimension">> => B#backup_info.dimension
+            } || B <- Backups],
+            ResultsJson = jsx:encode(BackupList),
             #{<<"content">> => [#{<<"type">> => <<"text">>, <<"text">> => ResultsJson}]};
         {error, Reason} ->
             #{<<"isError">> => true, <<"content">> => [#{<<"type">> => <<"text">>, <<"text">> => io_lib:format("Error: ~p", [Reason])}]}

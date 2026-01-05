@@ -1,40 +1,52 @@
+# Compiled files
+_build/
+*.beam
+*.o
+*.so
+*.dll
+
+# Logs
+*.log
+logs/
+
+# Data directories
+data/
+backups/
+test_data/
+test_backups/
+
+# Temporary files
+*.tmp
+*.swp
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Editor files
+.vscode/
+.idea/
+*.sublime-*
+
+# Rebar3
+.rebar3/
+rebar3.crashdump
 rebar.lock
-rebar.config
-_build/default/lib/.rebar3/rebar_compiler_erl/source_apps.dag
-_build/default/lib/.rebar3/rebar_compiler_erl/source_project_apps.dag
-_build/default/lib/erlvectordb/include
-_build/default/lib/erlvectordb/priv
-_build/default/lib/erlvectordb/src
-_build/default/lib/erlvectordb/ebin/erlvectordb_app.beam
-_build/default/lib/erlvectordb/ebin/erlvectordb_sup.beam
-_build/default/lib/erlvectordb/ebin/erlvectordb.app
-_build/default/lib/erlvectordb/ebin/erlvectordb.beam
-_build/default/lib/erlvectordb/ebin/mcp_server.beam
-_build/default/lib/erlvectordb/ebin/vector_index_manager.beam
-_build/default/lib/erlvectordb/ebin/vector_store_sup.beam
-_build/default/lib/erlvectordb/ebin/vector_store.beam
-_build/default/lib/erlvectordb/ebin/vector_utils.beam
-_build/default/lib/jsx/hex_metadata.config
-_build/default/lib/jsx/LICENSE
-_build/default/lib/jsx/README.md
-_build/default/lib/jsx/ebin/jsx_config.beam
-_build/default/lib/jsx/ebin/jsx_consult.beam
-_build/default/lib/jsx/ebin/jsx_decoder.beam
-_build/default/lib/jsx/ebin/jsx_encoder.beam
-_build/default/lib/jsx/ebin/jsx_parser.beam
-_build/default/lib/jsx/ebin/jsx_to_json.beam
-_build/default/lib/jsx/ebin/jsx_to_term.beam
-_build/default/lib/jsx/ebin/jsx_verify.beam
-_build/default/lib/jsx/ebin/jsx.app
-_build/default/lib/jsx/ebin/jsx.beam
-_build/default/lib/jsx/src/jsx_config.erl
-_build/default/lib/jsx/src/jsx_config.hrl
-_build/default/lib/jsx/src/jsx_consult.erl
-_build/default/lib/jsx/src/jsx_decoder.erl
-_build/default/lib/jsx/src/jsx_encoder.erl
-_build/default/lib/jsx/src/jsx_parser.erl
-_build/default/lib/jsx/src/jsx_to_json.erl
-_build/default/lib/jsx/src/jsx_to_term.erl
-_build/default/lib/jsx/src/jsx_verify.erl
-_build/default/lib/jsx/src/jsx.app.src
-_build/default/lib/jsx/src/jsx.erl
+
+# Erlang
+erl_crash.dump
+.erlang.cookie
+
+# Test outputs
+*.coverdata
+_checkouts/
+
+# Export files
+*.json
+*.backup

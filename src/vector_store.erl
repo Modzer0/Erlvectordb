@@ -16,14 +16,16 @@
 -export([start_link/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
--export([insert/3, search/3, delete/2, get_stats/1]).
+-export([insert/3, search/3, delete/2, get_stats/1, sync/1]).
 
 -record(state, {
     name :: atom(),
     vectors = #{} :: map(),
     metadata = #{} :: map(),
     index :: term(),
-    dimension :: integer() | undefined
+    dimension :: integer() | undefined,
+    persistence_pid :: pid() | undefined,
+    persistence_enabled = true :: boolean()
 }).
 
 -record(vector_entry, {
@@ -48,10 +50,62 @@ delete(StoreName, VectorId) ->
 get_stats(StoreName) ->
     gen_server:call(StoreName, get_stats).
 
+sync(StoreName) ->
+    gen_server:call(StoreName, sync).
+
 %% Callbacks
 init([Name]) ->
     process_flag(trap_exit, true),
-    {ok, #state{name = Name}}.
+    
+    PersistenceEnabled = application:get_env(erlvectordb, persistence_enabled, true),
+    
+    State = case PersistenceEnabled of
+        true ->
+            % Start persistence process
+            {ok, PersistencePid} = vector_persistence:start_link(Name),
+            
+            % Load existing vectors
+            case vector_persistence:load_vectors(Name) of
+                {ok, LoadedVectors} ->
+                    % Convert to the format expected by vector_store
+                    Vectors = maps:map(fun(_Id, VectorData) ->
+                        #vector_entry{
+                            id = _Id,
+                            vector = maps:get(vector, VectorData),
+                            metadata = maps:get(metadata, VectorData)
+                        }
+                    end, LoadedVectors),
+                    
+                    % Determine dimension from first vector
+                    Dimension = case maps:size(Vectors) of
+                        0 -> undefined;
+                        _ ->
+                            [FirstEntry | _] = maps:values(Vectors),
+                            length(FirstEntry#vector_entry.vector)
+                    end,
+                    
+                    #state{
+                        name = Name,
+                        vectors = Vectors,
+                        dimension = Dimension,
+                        persistence_pid = PersistencePid,
+                        persistence_enabled = true
+                    };
+                {error, _Reason} ->
+                    #state{
+                        name = Name,
+                        persistence_pid = PersistencePid,
+                        persistence_enabled = true
+                    }
+            end;
+        false ->
+            #state{
+                name = Name,
+                persistence_enabled = false
+            }
+    end,
+    
+    {ok, State}.
 
 handle_call({insert, VectorId, #{vector := Vector, metadata := Metadata}}, _From, State) ->
     case validate_vector(Vector, State#state.dimension) of
@@ -62,10 +116,22 @@ handle_call({insert, VectorId, #{vector := Vector, metadata := Metadata}}, _From
                 metadata = Metadata
             },
             NewVectors = maps:put(VectorId, Entry, State#state.vectors),
-            NewState = State#state{
-                vectors = NewVectors,
-                dimension = Dimension
-            },
+            
+            % Save to persistence if enabled
+            NewState = case State#state.persistence_enabled of
+                true ->
+                    vector_persistence:save_vector(State#state.name, VectorId, Vector, Metadata),
+                    State#state{
+                        vectors = NewVectors,
+                        dimension = Dimension
+                    };
+                false ->
+                    State#state{
+                        vectors = NewVectors,
+                        dimension = Dimension
+                    }
+            end,
+            
             {reply, ok, NewState};
         {error, Reason} ->
             {reply, {error, Reason}, State}
@@ -82,6 +148,15 @@ handle_call({search, QueryVector, K}, _From, State) ->
 
 handle_call({delete, VectorId}, _From, State) ->
     NewVectors = maps:remove(VectorId, State#state.vectors),
+    
+    % Delete from persistence if enabled
+    case State#state.persistence_enabled of
+        true ->
+            vector_persistence:delete_vector(State#state.name, VectorId);
+        false ->
+            ok
+    end,
+    
     NewState = State#state{vectors = NewVectors},
     {reply, ok, NewState};
 
@@ -89,9 +164,19 @@ handle_call(get_stats, _From, State) ->
     Stats = #{
         name => State#state.name,
         count => maps:size(State#state.vectors),
-        dimension => State#state.dimension
+        dimension => State#state.dimension,
+        persistence_enabled => State#state.persistence_enabled
     },
     {reply, {ok, Stats}, State};
+
+handle_call(sync, _From, State) ->
+    case State#state.persistence_enabled of
+        true ->
+            Result = vector_persistence:sync(State#state.name),
+            {reply, Result, State};
+        false ->
+            {reply, {error, persistence_disabled}, State}
+    end;
 
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.
@@ -102,8 +187,13 @@ handle_cast(_Msg, State) ->
 handle_info(_Info, State) ->
     {noreply, State}.
 
-terminate(_Reason, _State) ->
-    ok.
+terminate(_Reason, State) ->
+    case State#state.persistence_enabled of
+        true ->
+            vector_persistence:close_store(State#state.name);
+        false ->
+            ok
+    end.
 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.

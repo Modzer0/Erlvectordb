@@ -24,7 +24,13 @@
     search/4,
     delete/2,
     get_stats/1,
-    list_stores/0
+    list_stores/0,
+    sync/1,
+    backup_store/2,
+    restore_store/2,
+    export_store/2,
+    import_store/2,
+    list_backups/0
 ]).
 
 %% Application control
@@ -63,3 +69,23 @@ delete(StoreName, VectorId) when is_atom(StoreName) ->
 
 get_stats(StoreName) when is_atom(StoreName) ->
     vector_store:get_stats(StoreName).
+
+%% Persistence operations
+sync(StoreName) when is_atom(StoreName) ->
+    vector_store:sync(StoreName).
+
+%% Backup and restore operations
+backup_store(StoreName, BackupName) when is_atom(StoreName) ->
+    vector_backup:backup_store(StoreName, BackupName).
+
+restore_store(BackupPath, NewStoreName) when is_atom(NewStoreName) ->
+    vector_backup:restore_store(BackupPath, NewStoreName).
+
+export_store(StoreName, ExportPath) when is_atom(StoreName) ->
+    vector_backup:export_store(StoreName, ExportPath).
+
+import_store(ImportPath, StoreName) when is_atom(StoreName) ->
+    vector_backup:import_store(ImportPath, StoreName).
+
+list_backups() ->
+    vector_backup:list_backups().
