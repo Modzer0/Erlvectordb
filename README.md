@@ -258,9 +258,550 @@ erlvectordb:register_oauth_client(<<"my_app">>, <<"secure_secret">>, #{
 - **`write`**: Insert/delete vectors, sync stores
 - **`admin`**: Backup/restore operations, client management
 
+## AI Integration
+
+### Gemini AI Integration
+
+ErlVectorDB includes AI-powered features using Google's Gemini AI for semantic search and intelligent document analysis:
+
+```bash
+# Setup Gemini integration
+export GEMINI_API_KEY='your-gemini-api-key'
+pip install google-generativeai
+bash examples/setup_gemini_demo.sh
+
+# Run AI-enhanced demo
+python examples/gemini_mcp_client.py
+```
+
+**AI Features:**
+- **Semantic Embeddings**: Generate vector embeddings using Gemini AI
+- **Smart Document Analysis**: Automatic categorization and metadata extraction
+- **Intelligent Search**: Natural language queries with AI explanations
+- **Content Understanding**: Sentiment analysis and topic extraction
+
+**Example Usage:**
+```python
+from examples.gemini_mcp_client import GeminiMCPClient
+
+client = GeminiMCPClient(gemini_api_key="your-key")
+client.connect_to_vectordb()
+
+# AI-powered document insertion with automatic analysis
+result = client.smart_insert('ai_store', 'healthcare_doc', 
+    'AI is revolutionizing medical diagnosis and treatment...')
+
+# Semantic search with natural language
+search = client.smart_search('medical AI applications', 'ai_store')
+print(search['explanation'])  # AI explains why results are relevant
+```
+
+**Claude Desktop Integration:**
+```json
+{
+  "mcpServers": {
+    "erlvectordb-ai": {
+      "command": "python3",
+      "args": ["examples/gemini_mcp_client.py"],
+      "env": {
+        "GEMINI_API_KEY": "${GEMINI_API_KEY}",
+        "ERLVECTORDB_HOST": "localhost",
+        "ERLVECTORDB_PORT": "8080"
+      }
+    }
+  }
+}
+```
+
+Get your Gemini API key from: https://makersuite.google.com/app/apikey
+
 ## MCP Integration
 
 The database exposes an MCP server on port 8080 (configurable) with OAuth 2.1 authentication. OAuth server runs on port 8081.
+
+> 📖 **Detailed Setup Guide**: See [MCP Setup Guide](docs/MCP_SETUP_GUIDE.md) for complete configuration and connection instructions.
+
+### Quick MCP Setup
+
+1. **Start ErlVectorDB**:
+   ```bash
+   rebar3 shell
+   ```
+
+2. **Test Connection**:
+   ```bash
+   # Get OAuth token
+   curl -X POST http://localhost:8081/oauth/token \
+     -d "grant_type=client_credentials&client_id=admin&client_secret=admin_secret_2024&scope=read write"
+   
+   # Test MCP connection
+   telnet localhost 8080
+   ```
+
+3. **Run Example Client**:
+   ```bash
+   node examples/mcp_client.js
+   # or
+   python examples/mcp_client.py
+   # or AI-enhanced with Gemini
+   export GEMINI_API_KEY='your-key'
+   python examples/gemini_mcp_client.py
+   ```
+
+### MCP Server Configuration
+
+#### Basic Configuration
+```erlang
+% In config/sys.config
+[
+    {erlvectordb, [
+        {mcp_port, 8080},              % MCP server port
+        {oauth_enabled, true},         % Enable OAuth authentication
+        {oauth_port, 8081},           % OAuth server port
+        % ... other settings
+    ]}
+].
+```
+
+#### Disable Authentication (Development Only)
+```erlang
+{oauth_enabled, false}  % Disables OAuth - NOT recommended for production
+```
+
+### MCP Client Configuration
+
+#### For Claude Desktop
+
+Add to your Claude Desktop configuration file:
+
+**macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+**Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
+
+```json
+{
+  "mcpServers": {
+    "erlvectordb": {
+      "command": "node",
+      "args": ["/path/to/mcp-client.js"],
+      "env": {
+        "ERLVECTORDB_HOST": "localhost",
+        "ERLVECTORDB_PORT": "8080",
+        "ERLVECTORDB_OAUTH_HOST": "localhost", 
+        "ERLVECTORDB_OAUTH_PORT": "8081",
+        "ERLVECTORDB_CLIENT_ID": "admin",
+        "ERLVECTORDB_CLIENT_SECRET": "admin_secret_2024"
+      }
+    }
+  }
+}
+```
+
+#### For Other MCP Clients
+
+Configure your MCP client to connect to:
+- **MCP Endpoint**: `tcp://localhost:8080`
+- **OAuth Endpoint**: `http://localhost:8081/oauth/token`
+
+### MCP Client Implementation
+
+Here's a complete Node.js MCP client example:
+
+```javascript
+// mcp-client.js
+const net = require('net');
+const https = require('https');
+
+class ErlVectorDBClient {
+    constructor(options = {}) {
+        this.host = options.host || 'localhost';
+        this.port = options.port || 8080;
+        this.oauthHost = options.oauthHost || 'localhost';
+        this.oauthPort = options.oauthPort || 8081;
+        this.clientId = options.clientId || 'admin';
+        this.clientSecret = options.clientSecret || 'admin_secret_2024';
+        this.accessToken = null;
+        this.socket = null;
+    }
+
+    async getAccessToken() {
+        const postData = new URLSearchParams({
+            grant_type: 'client_credentials',
+            client_id: this.clientId,
+            client_secret: this.clientSecret,
+            scope: 'read write admin'
+        }).toString();
+
+        const options = {
+            hostname: this.oauthHost,
+            port: this.oauthPort,
+            path: '/oauth/token',
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Content-Length': Buffer.byteLength(postData)
+            }
+        };
+
+        return new Promise((resolve, reject) => {
+            const req = http.request(options, (res) => {
+                let data = '';
+                res.on('data', (chunk) => data += chunk);
+                res.on('end', () => {
+                    try {
+                        const response = JSON.parse(data);
+                        if (response.access_token) {
+                            this.accessToken = response.access_token;
+                            resolve(response.access_token);
+                        } else {
+                            reject(new Error('No access token received'));
+                        }
+                    } catch (error) {
+                        reject(error);
+                    }
+                });
+            });
+
+            req.on('error', reject);
+            req.write(postData);
+            req.end();
+        });
+    }
+
+    async connect() {
+        if (!this.accessToken) {
+            await this.getAccessToken();
+        }
+
+        return new Promise((resolve, reject) => {
+            this.socket = net.createConnection(this.port, this.host, () => {
+                console.log('Connected to ErlVectorDB MCP server');
+                resolve();
+            });
+
+            this.socket.on('error', reject);
+            this.socket.on('data', (data) => {
+                try {
+                    const response = JSON.parse(data.toString());
+                    this.handleResponse(response);
+                } catch (error) {
+                    console.error('Failed to parse response:', error);
+                }
+            });
+        });
+    }
+
+    async sendRequest(method, params = {}, id = 1) {
+        const request = {
+            jsonrpc: '2.0',
+            method: method,
+            params: params,
+            id: id,
+            auth: {
+                type: 'bearer',
+                token: this.accessToken
+            }
+        };
+
+        return new Promise((resolve, reject) => {
+            this.responseHandlers = this.responseHandlers || {};
+            this.responseHandlers[id] = { resolve, reject };
+
+            const requestData = JSON.stringify(request);
+            this.socket.write(requestData);
+        });
+    }
+
+    handleResponse(response) {
+        if (response.id && this.responseHandlers[response.id]) {
+            const handler = this.responseHandlers[response.id];
+            delete this.responseHandlers[response.id];
+
+            if (response.error) {
+                handler.reject(new Error(response.error.message));
+            } else {
+                handler.resolve(response.result);
+            }
+        }
+    }
+
+    // MCP Protocol Methods
+    async initialize() {
+        return this.sendRequest('initialize', {
+            protocolVersion: '2024-11-05',
+            capabilities: {
+                tools: {}
+            },
+            clientInfo: {
+                name: 'erlvectordb-client',
+                version: '1.0.0'
+            }
+        });
+    }
+
+    async listTools() {
+        return this.sendRequest('tools/list');
+    }
+
+    async callTool(name, arguments) {
+        return this.sendRequest('tools/call', {
+            name: name,
+            arguments: arguments
+        });
+    }
+
+    // Vector Database Operations
+    async createStore(name) {
+        return this.callTool('create_store', { name: name });
+    }
+
+    async insertVector(store, id, vector, metadata = {}) {
+        return this.callTool('insert_vector', {
+            store: store,
+            id: id,
+            vector: vector,
+            metadata: metadata
+        });
+    }
+
+    async searchVectors(store, vector, k = 10) {
+        return this.callTool('search_vectors', {
+            store: store,
+            vector: vector,
+            k: k
+        });
+    }
+
+    async syncStore(store) {
+        return this.callTool('sync_store', { store: store });
+    }
+
+    async backupStore(store, backupName) {
+        return this.callTool('backup_store', {
+            store: store,
+            backup_name: backupName
+        });
+    }
+
+    async listBackups() {
+        return this.callTool('list_backups', {});
+    }
+
+    disconnect() {
+        if (this.socket) {
+            this.socket.end();
+            this.socket = null;
+        }
+    }
+}
+
+// Usage Example
+async function main() {
+    const client = new ErlVectorDBClient({
+        host: process.env.ERLVECTORDB_HOST || 'localhost',
+        port: parseInt(process.env.ERLVECTORDB_PORT) || 8080,
+        oauthHost: process.env.ERLVECTORDB_OAUTH_HOST || 'localhost',
+        oauthPort: parseInt(process.env.ERLVECTORDB_OAUTH_PORT) || 8081,
+        clientId: process.env.ERLVECTORDB_CLIENT_ID || 'admin',
+        clientSecret: process.env.ERLVECTORDB_CLIENT_SECRET || 'admin_secret_2024'
+    });
+
+    try {
+        await client.connect();
+        await client.initialize();
+        
+        const tools = await client.listTools();
+        console.log('Available tools:', tools);
+
+        // Create a store
+        await client.createStore('test_store');
+        
+        // Insert a vector
+        await client.insertVector('test_store', 'doc1', [1.0, 2.0, 3.0], {
+            title: 'Test Document'
+        });
+        
+        // Search for similar vectors
+        const results = await client.searchVectors('test_store', [1.1, 2.1, 3.1], 5);
+        console.log('Search results:', results);
+        
+    } catch (error) {
+        console.error('Error:', error);
+    } finally {
+        client.disconnect();
+    }
+}
+
+if (require.main === module) {
+    main();
+}
+
+module.exports = ErlVectorDBClient;
+```
+
+### Python MCP Client
+
+```python
+# mcp_client.py
+import json
+import socket
+import requests
+from typing import Dict, List, Any, Optional
+
+class ErlVectorDBClient:
+    def __init__(self, host='localhost', port=8080, oauth_host='localhost', 
+                 oauth_port=8081, client_id='admin', client_secret='admin_secret_2024'):
+        self.host = host
+        self.port = port
+        self.oauth_host = oauth_host
+        self.oauth_port = oauth_port
+        self.client_id = client_id
+        self.client_secret = client_secret
+        self.access_token = None
+        self.socket = None
+        self.request_id = 1
+
+    def get_access_token(self) -> str:
+        """Get OAuth access token"""
+        url = f'http://{self.oauth_host}:{self.oauth_port}/oauth/token'
+        data = {
+            'grant_type': 'client_credentials',
+            'client_id': self.client_id,
+            'client_secret': self.client_secret,
+            'scope': 'read write admin'
+        }
+        
+        response = requests.post(url, data=data)
+        response.raise_for_status()
+        
+        token_data = response.json()
+        self.access_token = token_data['access_token']
+        return self.access_token
+
+    def connect(self):
+        """Connect to MCP server"""
+        if not self.access_token:
+            self.get_access_token()
+        
+        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.socket.connect((self.host, self.port))
+
+    def send_request(self, method: str, params: Dict = None, request_id: int = None) -> Dict:
+        """Send MCP request"""
+        if request_id is None:
+            request_id = self.request_id
+            self.request_id += 1
+
+        request = {
+            'jsonrpc': '2.0',
+            'method': method,
+            'params': params or {},
+            'id': request_id,
+            'auth': {
+                'type': 'bearer',
+                'token': self.access_token
+            }
+        }
+
+        request_data = json.dumps(request).encode('utf-8')
+        self.socket.send(request_data)
+
+        # Receive response
+        response_data = self.socket.recv(4096)
+        response = json.loads(response_data.decode('utf-8'))
+
+        if 'error' in response:
+            raise Exception(f"MCP Error: {response['error']['message']}")
+
+        return response.get('result', {})
+
+    def initialize(self) -> Dict:
+        """Initialize MCP connection"""
+        return self.send_request('initialize', {
+            'protocolVersion': '2024-11-05',
+            'capabilities': {'tools': {}},
+            'clientInfo': {
+                'name': 'erlvectordb-python-client',
+                'version': '1.0.0'
+            }
+        })
+
+    def list_tools(self) -> Dict:
+        """List available tools"""
+        return self.send_request('tools/list')
+
+    def call_tool(self, name: str, arguments: Dict) -> Dict:
+        """Call a specific tool"""
+        return self.send_request('tools/call', {
+            'name': name,
+            'arguments': arguments
+        })
+
+    # Vector Database Operations
+    def create_store(self, name: str) -> Dict:
+        return self.call_tool('create_store', {'name': name})
+
+    def insert_vector(self, store: str, vector_id: str, vector: List[float], 
+                     metadata: Dict = None) -> Dict:
+        return self.call_tool('insert_vector', {
+            'store': store,
+            'id': vector_id,
+            'vector': vector,
+            'metadata': metadata or {}
+        })
+
+    def search_vectors(self, store: str, vector: List[float], k: int = 10) -> Dict:
+        return self.call_tool('search_vectors', {
+            'store': store,
+            'vector': vector,
+            'k': k
+        })
+
+    def sync_store(self, store: str) -> Dict:
+        return self.call_tool('sync_store', {'store': store})
+
+    def backup_store(self, store: str, backup_name: str) -> Dict:
+        return self.call_tool('backup_store', {
+            'store': store,
+            'backup_name': backup_name
+        })
+
+    def list_backups(self) -> Dict:
+        return self.call_tool('list_backups', {})
+
+    def disconnect(self):
+        """Disconnect from server"""
+        if self.socket:
+            self.socket.close()
+            self.socket = None
+
+# Usage Example
+if __name__ == '__main__':
+    client = ErlVectorDBClient()
+    
+    try:
+        client.connect()
+        client.initialize()
+        
+        # List available tools
+        tools = client.list_tools()
+        print('Available tools:', tools)
+        
+        # Create a store
+        client.create_store('python_test_store')
+        
+        # Insert vectors
+        client.insert_vector('python_test_store', 'doc1', [1.0, 2.0, 3.0], 
+                           {'title': 'Python Test Document'})
+        
+        # Search
+        results = client.search_vectors('python_test_store', [1.1, 2.1, 3.1], 5)
+        print('Search results:', results)
+        
+    except Exception as e:
+        print(f'Error: {e}')
+    finally:
+        client.disconnect()
+```
 
 ### Available Tools (by scope):
 
@@ -297,6 +838,223 @@ The database exposes an MCP server on port 8080 (configurable) with OAuth 2.1 au
     "token": "your_access_token_here"
   },
   "id": 1
+}
+```
+
+### MCP Connection Testing
+
+#### Test OAuth Connection
+```bash
+# Test OAuth token endpoint
+curl -X POST http://localhost:8081/oauth/token \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=client_credentials&client_id=admin&client_secret=admin_secret_2024&scope=read write admin"
+```
+
+#### Test MCP Connection
+```bash
+# Test MCP server connectivity
+telnet localhost 8080
+
+# Send initialize request (after connecting)
+{"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}}},"id":1}
+```
+
+### MCP Integration Patterns
+
+#### Streaming Responses
+For large result sets, implement streaming:
+
+```javascript
+// Handle streaming responses
+client.socket.on('data', (chunk) => {
+    const lines = chunk.toString().split('\n');
+    lines.forEach(line => {
+        if (line.trim()) {
+            try {
+                const response = JSON.parse(line);
+                handleStreamingResponse(response);
+            } catch (e) {
+                // Handle partial JSON
+                buffer += line;
+            }
+        }
+    });
+});
+```
+
+#### Connection Pooling
+For high-throughput applications:
+
+```javascript
+class ErlVectorDBPool {
+    constructor(options, poolSize = 5) {
+        this.options = options;
+        this.poolSize = poolSize;
+        this.connections = [];
+        this.available = [];
+    }
+
+    async getConnection() {
+        if (this.available.length > 0) {
+            return this.available.pop();
+        }
+        
+        if (this.connections.length < this.poolSize) {
+            const client = new ErlVectorDBClient(this.options);
+            await client.connect();
+            await client.initialize();
+            this.connections.push(client);
+            return client;
+        }
+        
+        // Wait for available connection
+        return new Promise(resolve => {
+            const checkAvailable = () => {
+                if (this.available.length > 0) {
+                    resolve(this.available.pop());
+                } else {
+                    setTimeout(checkAvailable, 10);
+                }
+            };
+            checkAvailable();
+        });
+    }
+
+    releaseConnection(client) {
+        this.available.push(client);
+    }
+}
+```
+
+#### Error Handling and Retry Logic
+```javascript
+class RobustErlVectorDBClient extends ErlVectorDBClient {
+    async sendRequestWithRetry(method, params, maxRetries = 3) {
+        for (let attempt = 1; attempt <= maxRetries; attempt++) {
+            try {
+                return await this.sendRequest(method, params);
+            } catch (error) {
+                if (attempt === maxRetries) throw error;
+                
+                // Handle specific error types
+                if (error.message.includes('token_expired')) {
+                    await this.getAccessToken();
+                } else if (error.message.includes('connection')) {
+                    await this.connect();
+                    await this.initialize();
+                }
+                
+                // Exponential backoff
+                await new Promise(resolve => 
+                    setTimeout(resolve, Math.pow(2, attempt) * 1000)
+                );
+            }
+        }
+    }
+}
+```
+
+### MCP Troubleshooting
+
+#### Common Issues
+
+**1. Authentication Errors**
+```
+Error: Authentication required
+```
+- Verify OAuth server is running on port 8081
+- Check client credentials are correct
+- Ensure token hasn't expired (default: 1 hour)
+
+**2. Connection Refused**
+```
+Error: ECONNREFUSED
+```
+- Verify ErlVectorDB is running
+- Check MCP port configuration (default: 8080)
+- Ensure firewall allows connections
+
+**3. Invalid Tool Calls**
+```
+Error: Insufficient permissions
+```
+- Check OAuth scopes match tool requirements
+- Verify client has necessary permissions
+- Review scope-based access control
+
+**4. JSON Parse Errors**
+```
+Error: Unexpected token in JSON
+```
+- Ensure proper JSON formatting
+- Check for trailing commas or syntax errors
+- Verify UTF-8 encoding
+
+#### Debug Mode
+
+Enable debug logging in ErlVectorDB:
+```erlang
+% In config/sys.config
+{kernel, [
+    {logger_level, debug},
+    {logger, [
+        {handler, default, logger_std_h,
+            #{config => #{type => standard_io},
+              formatter => {logger_formatter, #{}}}}
+    ]}
+]}
+```
+
+#### Health Check Endpoint
+
+Test server health:
+```bash
+# Check if servers are responding
+curl -f http://localhost:8081/oauth/client_info \
+  -H "Authorization: Bearer YOUR_TOKEN" || echo "OAuth server down"
+
+telnet localhost 8080 || echo "MCP server down"
+```
+
+### MCP Performance Optimization
+
+#### Batch Operations
+```javascript
+// Batch insert multiple vectors
+async function batchInsert(client, store, vectors) {
+    const promises = vectors.map(({id, vector, metadata}) =>
+        client.insertVector(store, id, vector, metadata)
+    );
+    return Promise.all(promises);
+}
+```
+
+#### Connection Keep-Alive
+```javascript
+// Implement heartbeat to keep connection alive
+setInterval(() => {
+    if (client.socket && !client.socket.destroyed) {
+        client.listTools().catch(err => {
+            console.log('Heartbeat failed, reconnecting...');
+            client.connect();
+        });
+    }
+}, 30000); // 30 seconds
+```
+
+#### Compression for Large Vectors
+```javascript
+// Use compression for large vectors
+async function insertLargeVector(client, store, id, vector, metadata) {
+    if (vector.length > 1000) {
+        // Let server handle compression
+        return client.callTool('insert_compressed_vector', {
+            store, id, vector, metadata
+        });
+    } else {
+        return client.insertVector(store, id, vector, metadata);
+    }
 }
 ```
 
