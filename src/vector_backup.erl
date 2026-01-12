@@ -29,6 +29,14 @@
     dimension :: integer() | undefined
 }).
 
+-record(store_info, {
+    name :: atom(),
+    dimension :: integer() | undefined,
+    count :: integer(),
+    created :: integer(),
+    last_modified :: integer()
+}).
+
 %% Create a backup of a vector store
 backup_store(StoreName, BackupName) ->
     try
@@ -72,8 +80,8 @@ backup_store(StoreName, BackupName) ->
                 {error, {backup_write_failed, Reason}}
         end
     catch
-        Error:Reason ->
-            {error, {backup_failed, Error, Reason}}
+        CatchError:CatchReason:_Stacktrace ->
+            {error, {backup_failed, CatchError, CatchReason}}
     end.
 
 %% Restore a vector store from backup
@@ -127,8 +135,8 @@ restore_store(BackupPath, NewStoreName) ->
                 {error, {backup_read_failed, Reason}}
         end
     catch
-        Error:Reason ->
-            {error, {restore_failed, Error, Reason}}
+        CatchError:CatchReason:_Stacktrace ->
+            {error, {restore_failed, CatchError, CatchReason}}
     end.
 
 %% List all available backups
@@ -177,8 +185,8 @@ export_store(StoreName, ExportPath) ->
             {error, Reason} -> {error, {export_write_failed, Reason}}
         end
     catch
-        Error:Reason ->
-            {error, {export_failed, Error, Reason}}
+        CatchError:CatchReason:_Stacktrace ->
+            {error, {export_failed, CatchError, CatchReason}}
     end.
 
 %% Import store from JSON format
@@ -229,8 +237,8 @@ import_store(ImportPath, StoreName) ->
                 {error, {import_read_failed, Reason}}
         end
     catch
-        Error:Reason ->
-            {error, {import_failed, Error, Reason}}
+        CatchError:CatchReason:_Stacktrace ->
+            {error, {import_failed, CatchError, CatchReason}}
     end.
 
 %% Internal functions

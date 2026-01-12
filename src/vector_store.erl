@@ -16,7 +16,7 @@
 -export([start_link/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
--export([insert/3, search/3, delete/2, get_stats/1, sync/1]).
+-export([insert/3, search/3, delete/2, get_stats/1, sync/1, get_all_vectors/1]).
 
 -record(state, {
     name :: atom(),
@@ -52,6 +52,9 @@ get_stats(StoreName) ->
 
 sync(StoreName) ->
     gen_server:call(StoreName, sync).
+
+get_all_vectors(StoreName) ->
+    gen_server:call(StoreName, get_all_vectors).
 
 %% Callbacks
 init([Name]) ->
@@ -177,6 +180,14 @@ handle_call(sync, _From, State) ->
         false ->
             {reply, {error, persistence_disabled}, State}
     end;
+
+handle_call(get_all_vectors, _From, State) ->
+    % Convert vector_entry records back to the expected format
+    AllVectors = maps:map(fun(_Id, Entry) ->
+        #{vector => Entry#vector_entry.vector,
+          metadata => Entry#vector_entry.metadata}
+    end, State#state.vectors),
+    {reply, {ok, AllVectors}, State};
 
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.

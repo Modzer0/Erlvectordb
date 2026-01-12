@@ -19,6 +19,8 @@
 -export([save_vector/4, save_compressed_vector/4, load_vectors/1, delete_vector/2, 
          get_store_info/1, sync/1, close_store/1]).
 
+-type compressed_vector() :: map().
+
 -record(state, {
     store_name :: atom(),
     dets_table :: dets:tab_name(),

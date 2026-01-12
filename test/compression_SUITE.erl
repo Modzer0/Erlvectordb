@@ -55,7 +55,9 @@ test_8bit_quantization(_Config) ->
     {ok, Decompressed} = vector_compression:decompress_vector(Compressed, #{}),
     
     % Verify length is preserved
-    length(Vector) = length(Decompressed),
+    VectorLength = length(Vector),
+    DecompressedLength = length(Decompressed),
+    VectorLength = DecompressedLength,
     
     % Verify values are approximately correct (within quantization error)
     lists:foreach(fun({Original, Decompressed_Val}) ->
@@ -69,7 +71,9 @@ test_4bit_quantization(_Config) ->
     {ok, Compressed} = vector_compression:compress_vector(Vector, quantization_4bit),
     {ok, Decompressed} = vector_compression:decompress_vector(Compressed, #{}),
     
-    length(Vector) = length(Decompressed),
+    VectorLength = length(Vector),
+    DecompressedLength = length(Decompressed),
+    VectorLength = DecompressedLength,
     
     % 4-bit quantization should have higher error than 8-bit
     lists:foreach(fun({Original, Decompressed_Val}) ->
@@ -83,7 +87,9 @@ test_pca_compression(_Config) ->
     {ok, Compressed} = vector_compression:compress_vector(Vector, pca_compression),
     {ok, Decompressed} = vector_compression:decompress_vector(Compressed, #{}),
     
-    length(Vector) = length(Decompressed),
+    VectorLength = length(Vector),
+    DecompressedLength = length(Decompressed),
+    VectorLength = DecompressedLength,
     
     % PCA compression should preserve some structure
     true = is_list(Decompressed).
@@ -121,7 +127,9 @@ test_batch_compression(_Config) ->
     
     % Verify each vector is approximately correct
     lists:foreach(fun({Original, Decompressed}) ->
-        length(Original) = length(Decompressed)
+        OriginalLength = length(Original),
+        DecompressedLength = length(Decompressed),
+        OriginalLength = DecompressedLength
     end, lists:zip(Vectors, DecompressedVectors)).
 
 test_compression_benchmark(_Config) ->

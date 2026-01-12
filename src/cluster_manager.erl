@@ -24,7 +24,8 @@
     distribute_store/2,
     get_store_location/1,
     sync_cluster_state/0,
-    get_cluster_stats/0
+    get_cluster_stats/0,
+    get_store_distribution/0
 ]).
 
 -record(state, {
@@ -70,6 +71,9 @@ sync_cluster_state() ->
 
 get_cluster_stats() ->
     gen_server:call(?MODULE, get_cluster_stats).
+
+get_store_distribution() ->
+    gen_server:call(?MODULE, get_store_distribution).
 
 %% Callbacks
 init([]) ->
@@ -199,6 +203,9 @@ handle_call(get_cluster_stats, _From, State) ->
         local_stores => length(supervisor:which_children(vector_store_sup))
     },
     {reply, {ok, Stats}, State};
+
+handle_call(get_store_distribution, _From, State) ->
+    {reply, {ok, State#state.store_distribution}, State};
 
 handle_call(_Request, _From, State) ->
     {reply, {error, unknown_request}, State}.

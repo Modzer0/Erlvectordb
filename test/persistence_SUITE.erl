@@ -15,6 +15,14 @@
 
 -include_lib("common_test/include/ct.hrl").
 
+-record(backup_info, {
+    store_name :: atom(),
+    timestamp :: integer(),
+    file_path :: string(),
+    vector_count :: integer(),
+    dimension :: integer() | undefined
+}).
+
 all() ->
     [
         test_persistence_save_load,
