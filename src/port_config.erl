@@ -28,7 +28,9 @@
     is_container_mode/0,
     get_container_config/0,
     get_container_bind_interface/0,
-    should_bind_all_interfaces/0
+    should_bind_all_interfaces/0,
+    should_log_port_mappings/0,
+    get_container_shutdown_timeout/0
 ]).
 
 %% Types

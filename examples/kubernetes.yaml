@@ -1,0 +1,459 @@
+# Kubernetes deployment configuration for ErlVectorDB with port management
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: erlvectordb
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: erlvectordb-config
+  namespace: erlvectordb
+data:
+  container.config: |
+    [
+        {erlvectordb, [
+            {container_mode, true},
+            {port_config, #{
+                mcp_server => #{
+                    preferred_port => 8080,
+                    port_range => {8080, 8090},
+                    bind_interface => "0.0.0.0",
+                    required => true,
+                    startup_order => 1,
+                    health_check_path => "/health",
+                    container_mode => true
+                },
+                oauth_server => #{
+                    preferred_port => 8081,
+                    port_range => {8081, 8091},
+                    bind_interface => "0.0.0.0",
+                    required => true,
+                    startup_order => 2,
+                    health_check_path => "/oauth/health",
+                    container_mode => true
+                },
+                rest_api_server => #{
+                    preferred_port => 8082,
+                    port_range => {8082, 8092},
+                    bind_interface => "0.0.0.0",
+                    required => true,
+                    startup_order => 3,
+                    health_check_path => "/api/health",
+                    container_mode => true
+                }
+            }},
+            {container_config, #{
+                bind_interface => "0.0.0.0",
+                health_check_enabled => true,
+                graceful_shutdown_timeout => 30000,
+                port_mapping_logging => true
+            }},
+            {oauth_enabled, true},
+            {oauth_token_endpoint, "http://0.0.0.0:8081/oauth/token"},
+            {create_default_client, true},
+            {default_client_id, <<"admin">>},
+            {default_client_secret, <<"admin_secret_2024">>},
+            {token_lifetime, 3600000},
+            {refresh_token_lifetime, 86400000},
+            {cluster_enabled, true},
+            {node_name, 'erlvectordb@kubernetes'},
+            {cluster_cookie, erlvectordb_cluster},
+            {replication_factor, 2},
+            {heartbeat_interval, 5000},
+            {compression_enabled, true},
+            {compression_algorithm, quantization_8bit},
+            {max_vector_stores, 100},
+            {default_index_type, flat},
+            {persistence_enabled, true},
+            {persistence_dir, "/data"},
+            {backup_dir, "/backups"},
+            {sync_interval, 30000},
+            {auto_backup_enabled, true},
+            {auto_backup_interval, 3600000}
+        ]},
+        {kernel, [
+            {logger_level, info},
+            {logger, [
+                {handler, default, logger_std_h,
+                    #{config => #{type => standard_io},
+                      formatter => {logger_formatter, #{}}}}
+            ]}
+        ]}
+    ].
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: erlvectordb-data
+  namespace: erlvectordb
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+  storageClassName: fast-ssd
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: erlvectordb-backups
+  namespace: erlvectordb
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 50Gi
+  storageClassName: standard
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: erlvectordb
+  namespace: erlvectordb
+  labels:
+    app: erlvectordb
+    version: v1
+spec:
+  replicas: 3
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: erlvectordb
+  template:
+    metadata:
+      labels:
+        app: erlvectordb
+        version: v1
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8082"
+        prometheus.io/path: "/api/metrics"
+    spec:
+      serviceAccountName: erlvectordb
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+      containers:
+      - name: erlvectordb
+        image: erlvectordb:latest
+        imagePullPolicy: Always
+        ports:
+        - name: mcp
+          containerPort: 8080
+          protocol: TCP
+        - name: oauth
+          containerPort: 8081
+          protocol: TCP
+        - name: api
+          containerPort: 8082
+          protocol: TCP
+        env:
+        # Container mode configuration
+        - name: CONTAINER
+          value: "true"
+        - name: BIND_ALL_INTERFACES
+          value: "true"
+        - name: LOG_PORT_MAPPINGS
+          value: "true"
+        - name: GRACEFUL_SHUTDOWN_TIMEOUT
+          value: "30"
+        
+        # Service-specific port configuration
+        - name: MCP_SERVER_PORT
+          value: "8080"
+        - name: OAUTH_SERVER_PORT
+          value: "8081"
+        - name: REST_API_SERVER_PORT
+          value: "8082"
+        
+        # Kubernetes-specific configuration
+        - name: KUBERNETES_SERVICE_HOST
+          value: "kubernetes.default.svc.cluster.local"
+        - name: POD_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.name
+        - name: POD_NAMESPACE
+          valueFrom:
+            fieldRef:
+              fieldPath: metadata.namespace
+        - name: POD_IP
+          valueFrom:
+            fieldRef:
+              fieldPath: status.podIP
+        
+        # Configuration file path
+        - name: CONFIG_FILE_PATH
+          value: "/etc/erlvectordb/container.config"
+        
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "250m"
+          limits:
+            memory: "2Gi"
+            cpu: "1000m"
+        
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: mcp
+            scheme: HTTP
+          initialDelaySeconds: 60
+          periodSeconds: 30
+          timeoutSeconds: 10
+          successThreshold: 1
+          failureThreshold: 3
+        
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: mcp
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 10
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 3
+        
+        startupProbe:
+          httpGet:
+            path: /health
+            port: mcp
+            scheme: HTTP
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 5
+          successThreshold: 1
+          failureThreshold: 12  # Allow up to 60 seconds for startup
+        
+        volumeMounts:
+        - name: data
+          mountPath: /data
+        - name: backups
+          mountPath: /backups
+        - name: config
+          mountPath: /etc/erlvectordb
+          readOnly: true
+        
+        lifecycle:
+          preStop:
+            exec:
+              command:
+              - /bin/bash
+              - -c
+              - |
+                echo "Initiating graceful shutdown..."
+                # Send SIGTERM to allow graceful shutdown
+                kill -TERM 1
+                # Wait for graceful shutdown
+                sleep 30
+      
+      volumes:
+      - name: data
+        persistentVolumeClaim:
+          claimName: erlvectordb-data
+      - name: backups
+        persistentVolumeClaim:
+          claimName: erlvectordb-backups
+      - name: config
+        configMap:
+          name: erlvectordb-config
+      
+      terminationGracePeriodSeconds: 60
+      
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - erlvectordb
+              topologyKey: kubernetes.io/hostname
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: erlvectordb-service
+  namespace: erlvectordb
+  labels:
+    app: erlvectordb
+spec:
+  type: ClusterIP
+  selector:
+    app: erlvectordb
+  ports:
+  - name: mcp
+    port: 8080
+    targetPort: mcp
+    protocol: TCP
+  - name: oauth
+    port: 8081
+    targetPort: oauth
+    protocol: TCP
+  - name: api
+    port: 8082
+    targetPort: api
+    protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: erlvectordb-headless
+  namespace: erlvectordb
+  labels:
+    app: erlvectordb
+spec:
+  type: ClusterIP
+  clusterIP: None
+  selector:
+    app: erlvectordb
+  ports:
+  - name: mcp
+    port: 8080
+    targetPort: mcp
+    protocol: TCP
+  - name: oauth
+    port: 8081
+    targetPort: oauth
+    protocol: TCP
+  - name: api
+    port: 8082
+    targetPort: api
+    protocol: TCP
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: erlvectordb
+  namespace: erlvectordb
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: erlvectordb
+  namespace: erlvectordb
+rules:
+- apiGroups: [""]
+  resources: ["pods", "services", "endpoints"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "replicasets"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: erlvectordb
+  namespace: erlvectordb
+subjects:
+- kind: ServiceAccount
+  name: erlvectordb
+  namespace: erlvectordb
+roleRef:
+  kind: Role
+  name: erlvectordb
+  apiGroup: rbac.authorization.k8s.io
+---
+# Horizontal Pod Autoscaler
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: erlvectordb-hpa
+  namespace: erlvectordb
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: erlvectordb
+  minReplicas: 3
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300
+      policies:
+      - type: Percent
+        value: 10
+        periodSeconds: 60
+    scaleUp:
+      stabilizationWindowSeconds: 60
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+---
+# Network Policy for security
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: erlvectordb-network-policy
+  namespace: erlvectordb
+spec:
+  podSelector:
+    matchLabels:
+      app: erlvectordb
+  policyTypes:
+  - Ingress
+  - Egress
+  ingress:
+  - from:
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-nginx
+    - namespaceSelector:
+        matchLabels:
+          name: monitoring
+    - podSelector:
+        matchLabels:
+          app: erlvectordb
+    ports:
+    - protocol: TCP
+      port: 8080
+    - protocol: TCP
+      port: 8081
+    - protocol: TCP
+      port: 8082
+  egress:
+  - to: []
+    ports:
+    - protocol: TCP
+      port: 53
+    - protocol: UDP
+      port: 53
+  - to:
+    - podSelector:
+        matchLabels:
+          app: erlvectordb
+    ports:
+    - protocol: TCP
+      port: 8080
+    - protocol: TCP
+      port: 8081
+    - protocol: TCP
+      port: 8082

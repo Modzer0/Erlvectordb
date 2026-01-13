@@ -1,0 +1,122 @@
+version: '3.8'
+
+services:
+  erlvectordb:
+    build: 
+      context: ..
+      dockerfile: Dockerfile
+    container_name: erlvectordb
+    ports:
+      - "8080:8080"  # MCP Server
+      - "8081:8081"  # OAuth Server  
+      - "8082:8082"  # REST API Server
+    environment:
+      # Container mode configuration
+      - CONTAINER=true
+      - BIND_ALL_INTERFACES=true
+      - LOG_PORT_MAPPINGS=true
+      
+      # Service-specific port configuration
+      - MCP_SERVER_PORT=8080
+      - OAUTH_SERVER_PORT=8081
+      - REST_API_SERVER_PORT=8082
+      
+      # External port mapping (for logging)
+      - MCP_SERVER_EXTERNAL_PORT=8080
+      - OAUTH_SERVER_EXTERNAL_PORT=8081
+      - REST_API_SERVER_EXTERNAL_PORT=8082
+      
+      # Health check and shutdown configuration
+      - GRACEFUL_SHUTDOWN_TIMEOUT=30
+      
+      # Application configuration
+      - NODE_ENV=production
+    volumes:
+      - erlvectordb_data:/data
+      - erlvectordb_backups:/backups
+      - ./config/container.config:/app/config/container.config:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    restart: unless-stopped
+    networks:
+      - erlvectordb_network
+
+  # Development instance with different ports
+  erlvectordb-dev:
+    build: 
+      context: ..
+      dockerfile: Dockerfile
+    container_name: erlvectordb-dev
+    ports:
+      - "9080:9080"  # MCP Server (dev)
+      - "9081:9081"  # OAuth Server (dev)
+      - "9082:9082"  # REST API Server (dev)
+    environment:
+      # Development mode configuration
+      - ERLVECTORDB_DEV_MODE=true
+      - NODE_ENV=development
+      - CONTAINER=true
+      - BIND_ALL_INTERFACES=true
+      - LOG_PORT_MAPPINGS=true
+      
+      # Development port configuration
+      - MCP_SERVER_PORT=9080
+      - OAUTH_SERVER_PORT=9081
+      - REST_API_SERVER_PORT=9082
+      
+      # Development timeouts
+      - ERLVECTORDB_DEV_TIMEOUT_MS=2000
+      - GRACEFUL_SHUTDOWN_TIMEOUT=10
+    volumes:
+      - erlvectordb_dev_data:/data
+      - erlvectordb_dev_backups:/backups
+      - ./config/dev.config:/app/config/dev.config:ro
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 2
+      start_period: 20s
+    restart: unless-stopped
+    networks:
+      - erlvectordb_network
+    profiles:
+      - dev
+
+  # Load balancer for multiple instances
+  nginx:
+    image: nginx:alpine
+    container_name: erlvectordb-lb
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - erlvectordb
+    networks:
+      - erlvectordb_network
+    profiles:
+      - production
+
+volumes:
+  erlvectordb_data:
+    driver: local
+  erlvectordb_backups:
+    driver: local
+  erlvectordb_dev_data:
+    driver: local
+  erlvectordb_dev_backups:
+    driver: local
+
+networks:
+  erlvectordb_network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
