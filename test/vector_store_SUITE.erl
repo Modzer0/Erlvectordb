@@ -32,14 +32,19 @@ end_per_suite(_Config) ->
     application:stop(erlvectordb),
     ok.
 
-init_per_testcase(_TestCase, Config) ->
-    StoreName = test_store,
+init_per_testcase(TestCase, Config) ->
+    % Create unique store name for each test case to ensure isolation
+    StoreName = list_to_atom("test_store_" ++ atom_to_list(TestCase)),
     {ok, _Pid} = vector_store_sup:start_store(StoreName),
     [{store_name, StoreName} | Config].
 
 end_per_testcase(_TestCase, Config) ->
     StoreName = ?config(store_name, Config),
     vector_store_sup:stop_store(StoreName),
+    % Clean up any leftover files for this specific store
+    DataDir = application:get_env(erlvectordb, persistence_dir, "test_data"),
+    DetsFile = filename:join(DataDir, atom_to_list(StoreName) ++ ".dets"),
+    file:delete(DetsFile),
     ok.
 
 test_create_store(Config) ->

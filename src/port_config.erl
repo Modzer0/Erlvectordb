@@ -30,7 +30,8 @@
     get_container_bind_interface/0,
     should_bind_all_interfaces/0,
     should_log_port_mappings/0,
-    get_container_shutdown_timeout/0
+    get_container_shutdown_timeout/0,
+    get_default_bind_interface/0
 ]).
 
 %% Types
@@ -463,12 +464,27 @@ load_generic_container_vars(Config) ->
     end,
     
     % Check for container bind interface
+    % Only set bind_interface if:
+    % 1. BIND_ALL_INTERFACES is explicitly set, OR
+    % 2. We're in container mode, OR
+    % 3. There's already some configuration (meaning env vars were set for this service)
     Config2 = case should_bind_all_interfaces() of
         true -> maps:put(bind_interface, "0.0.0.0", Config1);
         false -> 
-            case maps:is_key(bind_interface, Config1) of
-                false -> maps:put(bind_interface, "127.0.0.1", Config1);
-                true -> Config1
+            case is_container_mode() of
+                true ->
+                    % In container mode, default to 0.0.0.0 unless explicitly set
+                    case maps:is_key(bind_interface, Config1) of
+                        false -> maps:put(bind_interface, "0.0.0.0", Config1);
+                        true -> Config1
+                    end;
+                false ->
+                    % Not in container mode - only set bind_interface if there's other config
+                    % This prevents overriding app env config when no env vars are set
+                    case maps:size(Config1) > 0 andalso not maps:is_key(bind_interface, Config1) of
+                        true -> maps:put(bind_interface, "127.0.0.1", Config1);
+                        false -> Config1
+                    end
             end
     end,
     

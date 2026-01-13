@@ -233,7 +233,10 @@ handle_info(_Info, State) ->
 terminate(_Reason, State) ->
     sync_to_dets(State),
     dets:close(State#state.dets_table),
-    ets:delete(State#state.ets_table),
+    case ets:info(State#state.ets_table) of
+        undefined -> ok; % Table already deleted
+        _ -> ets:delete(State#state.ets_table)
+    end,
     ok.
 
 code_change(_OldVsn, State, _Extra) ->

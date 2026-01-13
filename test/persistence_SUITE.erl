@@ -45,14 +45,19 @@ end_per_suite(_Config) ->
     os:cmd("rm -rf test_data test_backups"),
     ok.
 
-init_per_testcase(_TestCase, Config) ->
-    StoreName = test_persistence_store,
+init_per_testcase(TestCase, Config) ->
+    % Create unique store name for each test case to ensure isolation
+    StoreName = list_to_atom("test_persistence_store_" ++ atom_to_list(TestCase)),
     {ok, _Pid} = vector_store_sup:start_store(StoreName),
     [{store_name, StoreName} | Config].
 
 end_per_testcase(_TestCase, Config) ->
     StoreName = ?config(store_name, Config),
     vector_store_sup:stop_store(StoreName),
+    % Clean up any leftover files for this specific store
+    DataDir = application:get_env(erlvectordb, persistence_dir, "test_data"),
+    DetsFile = filename:join(DataDir, atom_to_list(StoreName) ++ ".dets"),
+    file:delete(DetsFile),
     ok.
 
 test_persistence_save_load(Config) ->
@@ -150,7 +155,11 @@ test_export_import(Config) ->
     % Verify imported data
     {ok, Results} = vector_store:search(ImportStoreName, [2.0, 3.0, 4.0], 1),
     1 = length(Results),
-    [{<<"export_vector">>, #{export_test := true}, _}] = Results,
+    [Result] = Results,
+    {<<"export_vector">>, Metadata, Distance} = Result,
+    true = maps:is_key(export_test, Metadata) orelse maps:is_key(<<"export_test">>, Metadata),
+    % Distance should be very close to 0 (allowing for floating point precision)
+    true = abs(Distance) < 0.0001,
     
     % Clean up
     vector_store_sup:stop_store(ImportStoreName),

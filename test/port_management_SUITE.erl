@@ -49,6 +49,9 @@ init_per_testcase(_TestCase, Config) ->
     % Ensure application is started
     application:ensure_all_started(erlvectordb),
     
+    % Disable container mode detection for tests
+    application:set_env(erlvectordb, container_mode, false),
+    
     % Clean up any existing port manager
     case whereis(port_manager) of
         undefined -> 
@@ -68,6 +71,9 @@ init_per_testcase(_TestCase, Config) ->
     % Clear any existing port configuration
     application:unset_env(erlvectordb, port_config),
     
+    % Clean up all port-related environment variables
+    cleanup_all_port_env_vars(),
+    
     Config.
 
 end_per_testcase(_TestCase, _Config) ->
@@ -86,6 +92,41 @@ end_per_testcase(_TestCase, _Config) ->
     catch
         _:_ -> ok
     end,
+    
+    % Clean up container mode setting
+    application:unset_env(erlvectordb, container_mode),
+    
+    % Clean up all port-related environment variables
+    cleanup_all_port_env_vars(),
+    
+    ok.
+
+%% Helper function to clean up all port-related environment variables
+cleanup_all_port_env_vars() ->
+    EnvVars = [
+        "PORT",
+        "BIND_ALL_INTERFACES",
+        "MCP_SERVER_PORT",
+        "MCP_SERVER_PORT_RANGE_START",
+        "MCP_SERVER_PORT_RANGE_END",
+        "MCP_SERVER_BIND_INTERFACE",
+        "MCP_SERVER_REQUIRED",
+        "OAUTH_SERVER_PORT",
+        "OAUTH_SERVER_PORT_RANGE_START",
+        "OAUTH_SERVER_PORT_RANGE_END",
+        "OAUTH_SERVER_BIND_INTERFACE",
+        "OAUTH_SERVER_REQUIRED",
+        "REST_API_SERVER_PORT",
+        "REST_API_SERVER_PORT_RANGE_START",
+        "REST_API_SERVER_PORT_RANGE_END",
+        "REST_API_SERVER_BIND_INTERFACE",
+        "REST_API_SERVER_REQUIRED",
+        "CONTAINER",
+        "DOCKER",
+        "ERLVECTORDB_DEV_MODE",
+        "NODE_ENV"
+    ],
+    [os:unsetenv(Var) || Var <- EnvVars],
     ok.
 
 %% Feature: port-management, Property 1: Port Conflict Detection
@@ -618,7 +659,7 @@ run_configuration_loading_test() ->
     % Test different configuration sources with equal probability
     TestCase = rand:uniform(4),
     
-    case TestCase of
+    Result = case TestCase of
         1 ->
             % Test application environment configuration
             test_app_env_config_loading();
@@ -631,31 +672,49 @@ run_configuration_loading_test() ->
         4 ->
             % Test configuration merging (multiple sources)
             test_config_merging()
-    end.
+    end,
+    
+    % Log failures for debugging
+    case Result of
+        fail ->
+            ct:pal("Configuration loading test case ~p failed", [TestCase]);
+        _ ->
+            ok
+    end,
+    Result.
 
 test_app_env_config_loading() ->
-    % Generate random but valid configuration
-    McpPort = 8100 + rand:uniform(100),
-    OAuthPort = 8200 + rand:uniform(100),
-    RestPort = 8300 + rand:uniform(100),
+    % Clean up any leftover environment variables first
+    cleanup_all_port_env_vars(),
+    
+    % Generate random but valid configuration (ports must be >= 1024 and <= 65535)
+    % Leave room for port range (10 ports) so max base port is 65525
+    McpPort = 1024 + rand:uniform(64501),  % 1024 to 65525
+    OAuthPort = 1024 + rand:uniform(64501),
+    RestPort = 1024 + rand:uniform(64501),
+    
+    % Ensure port ranges are valid (start <= end) and don't exceed 65535
+    McpRangeEnd = min(McpPort + 10, 65535),
+    OAuthRangeEnd = min(OAuthPort + 10, 65535),
+    RestRangeEnd = min(RestPort + 10, 65535),
     
     % Create structured port configuration
     PortConfig = #{
         mcp_server => #{
             preferred_port => McpPort,
-            port_range => {McpPort, McpPort + 10},
+            port_range => {McpPort, McpRangeEnd},
             bind_interface => "127.0.0.1",
             required => true
         },
         oauth_server => #{
             preferred_port => OAuthPort,
-            port_range => {OAuthPort, OAuthPort + 10},
+            port_range => {OAuthPort, OAuthRangeEnd},
             bind_interface => "0.0.0.0",
             required => true
         },
         rest_api_server => #{
             preferred_port => RestPort,
-            port_range => {RestPort, RestPort + 10},
+            port_range => {RestPort, RestRangeEnd},
             bind_interface => "127.0.0.1",
             required => false
         }
@@ -671,18 +730,27 @@ test_app_env_config_loading() ->
         % Verify that loaded configuration matches what we set
         case validate_loaded_config(LoadedConfig, PortConfig) of
             true -> pass;
-            false -> fail
+            false -> 
+                ct:pal("test_app_env_config_loading failed:~n"
+                       "  Expected: ~p~n"
+                       "  Got: ~p~n",
+                       [PortConfig, LoadedConfig]),
+                fail
         end
     after
         % Clean up
-        application:unset_env(erlvectordb, port_config)
+        application:unset_env(erlvectordb, port_config),
+        cleanup_all_port_env_vars()
     end.
 
 test_env_var_config_loading() ->
-    % Generate random but valid configuration
-    McpPort = 8400 + rand:uniform(100),
+    % Clean up any leftover environment variables first
+    cleanup_all_port_env_vars(),
+    
+    % Generate random but valid configuration (ports must be >= 1024 and <= 65530)
+    McpPort = 1024 + rand:uniform(64506),  % Leave room for range end
     McpRangeStart = McpPort,
-    McpRangeEnd = McpPort + 5,
+    McpRangeEnd = min(McpPort + 5, 65535),
     
     % Set environment variables
     os:putenv("MCP_SERVER_PORT", integer_to_list(McpPort)),
@@ -714,17 +782,17 @@ test_env_var_config_loading() ->
         end
     after
         % Clean up environment variables
-        os:unsetenv("MCP_SERVER_PORT"),
-        os:unsetenv("MCP_SERVER_PORT_RANGE_START"),
-        os:unsetenv("MCP_SERVER_PORT_RANGE_END"),
-        os:unsetenv("MCP_SERVER_BIND_INTERFACE")
+        cleanup_all_port_env_vars()
     end.
 
 test_legacy_config_loading() ->
-    % Generate random but valid ports
-    McpPort = 8500 + rand:uniform(100),
-    OAuthPort = 8600 + rand:uniform(100),
-    RestPort = 8700 + rand:uniform(100),
+    % Clean up any leftover environment variables first
+    cleanup_all_port_env_vars(),
+    
+    % Generate random but valid ports (ports must be >= 1024 and <= 65535)
+    McpPort = 1024 + rand:uniform(64511),
+    OAuthPort = 1024 + rand:uniform(64511),
+    RestPort = 1024 + rand:uniform(64511),
     
     % Set legacy configuration format
     application:set_env(erlvectordb, mcp_port, McpPort),
@@ -756,14 +824,18 @@ test_legacy_config_loading() ->
         % Clean up
         application:unset_env(erlvectordb, mcp_port),
         application:unset_env(erlvectordb, oauth_port),
-        application:unset_env(erlvectordb, rest_api_port)
+        application:unset_env(erlvectordb, rest_api_port),
+        cleanup_all_port_env_vars()
     end.
 
 test_config_merging() ->
+    % Clean up any leftover environment variables first
+    cleanup_all_port_env_vars(),
+    
     % Test that higher priority sources override lower priority ones
     % Set up base configuration in application environment
-    BasePort = 8800,
-    OverridePort = 8900,
+    BasePort = 1024 + rand:uniform(1000),  % Ensure valid port
+    OverridePort = 2024 + rand:uniform(1000),  % Ensure valid port
     
     % Set application environment (lower priority)
     application:set_env(erlvectordb, mcp_port, BasePort),
@@ -794,7 +866,7 @@ test_config_merging() ->
     after
         % Clean up
         application:unset_env(erlvectordb, mcp_port),
-        os:unsetenv("MCP_SERVER_PORT")
+        cleanup_all_port_env_vars()
     end.
 
 %% Helper function to validate loaded configuration
@@ -857,7 +929,7 @@ run_per_service_configuration_test() ->
     % Test different scenarios with equal probability
     TestCase = rand:uniform(4),
     
-    case TestCase of
+    Result = case TestCase of
         1 ->
             % Test separate port ranges for each service
             test_separate_service_port_ranges();
@@ -870,33 +942,50 @@ run_per_service_configuration_test() ->
         4 ->
             % Test container-specific per-service configuration
             test_container_per_service_config()
-    end.
+    end,
+    
+    % Log failures for debugging
+    case Result of
+        fail ->
+            ct:pal("Per-service configuration test case ~p failed", [TestCase]);
+        _ ->
+            ok
+    end,
+    Result.
 
 test_separate_service_port_ranges() ->
-    % Generate separate, non-overlapping port ranges for each service
-    McpBase = 8100 + rand:uniform(50),
-    OAuthBase = 8200 + rand:uniform(50),
-    RestBase = 8300 + rand:uniform(50),
+    % Clean up any leftover environment variables first
+    cleanup_all_port_env_vars(),
+    
+    % Generate separate, non-overlapping port ranges for each service (ports must be >= 1024 and <= 65535)
+    McpBase = 1024 + rand:uniform(20000),
+    OAuthBase = 25000 + rand:uniform(20000),
+    RestBase = 50000 + rand:uniform(15525),  % Leave room for RangeSize (max 10)
     
     RangeSize = 5 + rand:uniform(5),  % 5-10 ports per service
+    
+    % Calculate range ends ensuring they don't exceed 65535
+    McpRangeEnd = min(McpBase + RangeSize - 1, 65535),
+    OAuthRangeEnd = min(OAuthBase + RangeSize - 1, 65535),
+    RestRangeEnd = min(RestBase + RangeSize - 1, 65535),
     
     % Create separate configurations for each service
     PortConfig = #{
         mcp_server => #{
             preferred_port => McpBase,
-            port_range => {McpBase, McpBase + RangeSize - 1},
+            port_range => {McpBase, McpRangeEnd},
             bind_interface => "127.0.0.1",
             required => true
         },
         oauth_server => #{
             preferred_port => OAuthBase,
-            port_range => {OAuthBase, OAuthBase + RangeSize - 1},
+            port_range => {OAuthBase, OAuthRangeEnd},
             bind_interface => "0.0.0.0",
             required => true
         },
         rest_api_server => #{
             preferred_port => RestBase,
-            port_range => {RestBase, RestBase + RangeSize - 1},
+            port_range => {RestBase, RestRangeEnd},
             bind_interface => "127.0.0.1",
             required => false
         }
@@ -930,26 +1019,30 @@ test_separate_service_port_ranges() ->
         % Verify configurations are separate and correct
         if 
             McpPort =:= McpBase andalso
-            McpRange =:= {McpBase, McpBase + RangeSize - 1} andalso
+            McpRange =:= {McpBase, McpRangeEnd} andalso
             McpInterface =:= "127.0.0.1" andalso
             OAuthPort =:= OAuthBase andalso
-            OAuthRange =:= {OAuthBase, OAuthBase + RangeSize - 1} andalso
+            OAuthRange =:= {OAuthBase, OAuthRangeEnd} andalso
             OAuthInterface =:= "0.0.0.0" andalso
             RestPort =:= RestBase andalso
-            RestRange =:= {RestBase, RestBase + RangeSize - 1} andalso
+            RestRange =:= {RestBase, RestRangeEnd} andalso
             RestRequired =:= false ->
                 pass;
             true ->
                 fail
         end
     after
-        application:unset_env(erlvectordb, port_config)
+        application:unset_env(erlvectordb, port_config),
+        cleanup_all_port_env_vars()
     end.
 
 test_per_service_env_vars() ->
+    % Clean up any leftover environment variables first
+    cleanup_all_port_env_vars(),
+    
     % Test that each service can be configured independently via environment variables
-    McpPort = 8400 + rand:uniform(50),
-    OAuthPort = 8500 + rand:uniform(50),
+    McpPort = 1024 + rand:uniform(20000),
+    OAuthPort = 25000 + rand:uniform(20000),
     
     % Set environment variables for different services
     os:putenv("MCP_SERVER_PORT", integer_to_list(McpPort)),
@@ -985,17 +1078,16 @@ test_per_service_env_vars() ->
         end
     after
         % Clean up environment variables
-        os:unsetenv("MCP_SERVER_PORT"),
-        os:unsetenv("MCP_SERVER_BIND_INTERFACE"),
-        os:unsetenv("OAUTH_SERVER_PORT"),
-        os:unsetenv("OAUTH_SERVER_BIND_INTERFACE"),
-        os:unsetenv("OAUTH_SERVER_REQUIRED")
+        cleanup_all_port_env_vars()
     end.
 
 test_service_config_overrides() ->
+    % Clean up any leftover environment variables first
+    cleanup_all_port_env_vars(),
+    
     % Test that service-specific configuration overrides defaults
-    BasePort = 8600 + rand:uniform(50),
-    OverridePort = 8700 + rand:uniform(50),
+    BasePort = 1024 + rand:uniform(20000),
+    OverridePort = 25000 + rand:uniform(20000),
     
     % Set a base configuration for one service
     application:set_env(erlvectordb, mcp_port, BasePort),
@@ -1031,19 +1123,26 @@ test_service_config_overrides() ->
     after
         % Clean up
         application:unset_env(erlvectordb, mcp_port),
-        application:unset_env(erlvectordb, port_config)
+        application:unset_env(erlvectordb, port_config),
+        cleanup_all_port_env_vars()
     end.
 
 test_container_per_service_config() ->
+    % Clean up any leftover environment variables first
+    cleanup_all_port_env_vars(),
+    
     % Test container-specific configuration for services
-    ContainerPort = 8800 + rand:uniform(50),
+    ContainerPort = 1024 + rand:uniform(20000),
+    
+    % Enable container mode for this test
+    application:set_env(erlvectordb, container_mode, true),
     
     % Set container environment variables
     os:putenv("PORT", integer_to_list(ContainerPort)),
     os:putenv("BIND_ALL_INTERFACES", "true"),
     
     % Also set service-specific configuration that should take precedence
-    ServiceSpecificPort = 8900 + rand:uniform(50),
+    ServiceSpecificPort = 25000 + rand:uniform(20000),
     os:putenv("MCP_SERVER_PORT", integer_to_list(ServiceSpecificPort)),
     
     try
@@ -1072,10 +1171,9 @@ test_container_per_service_config() ->
                 fail
         end
     after
-        % Clean up environment variables
-        os:unsetenv("PORT"),
-        os:unsetenv("BIND_ALL_INTERFACES"),
-        os:unsetenv("MCP_SERVER_PORT")
+        % Clean up environment variables and container mode
+        cleanup_all_port_env_vars(),
+        application:set_env(erlvectordb, container_mode, false)
     end.
 
 %% Feature: port-management, Property 16: Pre-Service Port Binding

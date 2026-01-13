@@ -13,7 +13,7 @@
 -module(mcp_server).
 -behaviour(gen_server).
 
--export([start_link/0]).
+-export([start_link/0, authenticate_mcp_request/1, check_tool_permission/2]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2,
          terminate/2, code_change/3]).
 
@@ -413,7 +413,7 @@ filter_tools_by_scopes(Tools, ClientScopes) ->
 
 check_tool_permission(ToolName, ClientScopes) ->
     AllTools = get_all_tools(),
-    case lists:keyfind(ToolName, 2, [{maps:get(<<"name">>, T), T} || T <- AllTools]) of
+    case lists:keyfind(ToolName, 1, [{maps:get(<<"name">>, T), T} || T <- AllTools]) of
         {ToolName, Tool} ->
             RequiredScopes = maps:get(<<"required_scopes">>, Tool, []),
             has_required_scopes(RequiredScopes, ClientScopes);
