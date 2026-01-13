@@ -1,0 +1,180 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>Unexpected I/O log</title>
+<meta http-equiv="cache-control" content="no-cache"></meta>
+<meta http-equiv="content-type" content="text/html; charset=utf-8"></meta>
+<link rel="stylesheet" href="../../ct_default.css" type="text/css"></link>
+<script type="text/javascript" src="../../jquery-latest.js"></script>
+<script type="text/javascript" src="../../jquery.tablesorter.min.js"></script>
+</head>
+<body>
+
+<br />
+<h3>Unexpected I/O</h3>
+<pre>
+
+</pre>
+<div class="sasl"><pre><b>*** System report 2026-01-12 22:49:47.424 ***</b>
+=INFO REPORT==== 12-Jan-2026::22:49:47.424735 ===
+Starting coordinated application startup
+
+
+</pre></div>
+<pre>
+</pre>
+<div class="sasl"><pre><b>*** System report 2026-01-12 22:49:47.424 ***</b>
+=INFO REPORT==== 12-Jan-2026::22:49:47.424868 ===
+Step 1: Pre-allocating ports
+
+
+</pre></div>
+<pre>
+</pre>
+<div class="sasl"><pre><b>*** System report 2026-01-12 22:49:47.424 ***</b>
+=INFO REPORT==== 12-Jan-2026::22:49:47.424924 ===
+Pre-allocating ports for services: [rest_api_server,mcp_server,oauth_server]
+
+
+</pre></div>
+<pre>
+</pre>
+<div class="sasl"><pre><b>*** System report 2026-01-12 22:49:47.427 ***</b>
+=INFO REPORT==== 12-Jan-2026::22:49:47.427040 ===
+Port 8082 registered for service rest_api_server (pid: &lt;0.95.0&gt;)
+
+
+</pre></div>
+<pre>
+</pre>
+<div class="sasl"><pre><b>*** System report 2026-01-12 22:49:47.427 ***</b>
+=INFO REPORT==== 12-Jan-2026::22:49:47.427146 ===
+Port 8082 allocated for service rest_api_server
+
+
+</pre></div>
+<pre>
+</pre>
+<div class="sasl"><pre><b>*** System report 2026-01-12 22:49:47.427 ***</b>
+=INFO REPORT==== 12-Jan-2026::22:49:47.427497 ===
+Port 8080 registered for service mcp_server (pid: &lt;0.95.0&gt;)
+
+
+</pre></div>
+<pre>
+</pre>
+<div class="sasl"><pre><b>*** System report 2026-01-12 22:49:47.427 ***</b>
+=INFO REPORT==== 12-Jan-2026::22:49:47.427608 ===
+Port 8080 allocated for service mcp_server
+
+
+</pre></div>
+<pre>
+</pre>
+<div class="sasl"><pre><b>*** System report 2026-01-12 22:49:47.427 ***</b>
+=INFO REPORT==== 12-Jan-2026::22:49:47.427801 ===
+Port 8081 registered for service oauth_server (pid: &lt;0.95.0&gt;)
+
+
+</pre></div>
+<pre>
+</pre>
+<div class="sasl"><pre><b>*** System report 2026-01-12 22:49:47.427 ***</b>
+=INFO REPORT==== 12-Jan-2026::22:49:47.427848 ===
+Port 8081 allocated for service oauth_server
+
+
+</pre></div>
+<pre>
+</pre>
+<div class="sasl"><pre><b>*** System report 2026-01-12 22:49:47.427 ***</b>
+=INFO REPORT==== 12-Jan-2026::22:49:47.427882 ===
+Successfully pre-allocated all ports: [#{port =&gt; 8082,status =&gt; bound,
+                                         service =&gt; rest_api_server},
+                                       #{port =&gt; 8080,status =&gt; bound,
+                                         service =&gt; mcp_server},
+                                       #{port =&gt; 8081,status =&gt; bound,
+                                         service =&gt; oauth_server}]
+
+
+</pre></div>
+<pre>
+</pre>
+<div class="sasl"><pre><b>*** System report 2026-01-12 22:49:47.427 ***</b>
+=INFO REPORT==== 12-Jan-2026::22:49:47.427943 ===
+Ports pre-allocated successfully: [#{port =&gt; 8082,status =&gt; bound,
+                                     service =&gt; rest_api_server},
+                                   #{port =&gt; 8080,status =&gt; bound,
+                                     service =&gt; mcp_server},
+                                   #{port =&gt; 8081,status =&gt; bound,
+                                     service =&gt; oauth_server}]
+
+
+</pre></div>
+<pre>
+</pre>
+<div class="sasl"><pre><b>*** System report 2026-01-12 22:49:47.428 ***</b>
+=INFO REPORT==== 12-Jan-2026::22:49:47.427997 ===
+Step 2: Starting network services
+
+
+</pre></div>
+<pre>
+</pre>
+<div class="sasl"><pre><b>*** System report 2026-01-12 22:49:47.428 ***</b>
+=INFO REPORT==== 12-Jan-2026::22:49:47.428022 ===
+Starting network service: mcp_server
+
+
+</pre></div>
+<pre>
+</pre>
+<div class="sasl"><pre><b>*** System report 2026-01-12 22:49:47.428 ***</b>
+=ERROR REPORT==== 12-Jan-2026::22:49:47.428169 ===
+Startup coordination failed with exception: error:undef
+[{mcp_server,start_link,[],[]},
+ {startup_coordinator,start_single_network_service,1,
+                      [{file,"src/startup_coordinator.erl"},{line,135}]},
+ {startup_coordinator,start_services_sequentially,1,
+                      [{file,"src/startup_coordinator.erl"},{line,121}]},
+ {startup_coordinator,do_coordinate_startup,0,
+                      [{file,"src/startup_coordinator.erl"},{line,88}]},
+ {startup_coordinator,handle_call,3,
+                      [{file,"src/startup_coordinator.erl"},{line,51}]},
+ {gen_server,try_handle_call,4,[{file,"gen_server.erl"},{line,2470}]},
+ {gen_server,handle_msg,3,[{file,"gen_server.erl"},{line,2499}]},
+ {proc_lib,init_p_do_apply,3,[{file,"proc_lib.erl"},{line,333}]}]
+
+
+</pre></div>
+<pre>
+</pre>
+<div class="sasl"><pre><b>*** System report 2026-01-12 22:49:47.428 ***</b>
+=ERROR REPORT==== 12-Jan-2026::22:49:47.428382 ===
+Network services startup coordination failed: {startup_exception,error,undef}
+
+
+</pre></div>
+<pre>
+</pre>
+<div class="sasl"><pre><b>*** System report 2026-01-12 22:49:47.428 ***</b>
+=ERROR REPORT==== 12-Jan-2026::22:49:47.428438 ===
+Application will continue running, but some network services may not be available
+
+
+</pre></div>
+<pre>
+</pre>
+<center>
+<br /><hr /><p>
+<a href="../../../all_runs.html">Test run history
+</a>  |  <a href="../../../index.html">Top level test index
+</a>  |  <a href="../../../suite.log.latest.html">Latest test result</a>
+</p>
+<div class="copyright">Copyright &copy; 2026 <a href="http://www.erlang.org">Open Telecom Platform</a><br />
+Updated: <!--date-->Mon Jan 12 2026 22:49:47<!--/date--><br />
+</div>
+</center>
+</body>
+</html>

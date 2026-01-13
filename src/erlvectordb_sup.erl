@@ -26,7 +26,45 @@ init([]) ->
                  intensity => 0,
                  period => 1},
     
+    % Port manager must start first to allocate ports for other services
+    PortManagerSpec = #{id => port_manager,
+                       start => {port_manager, start_link, []},
+                       restart => permanent,
+                       shutdown => 5000,
+                       type => worker,
+                       modules => [port_manager]},
+    
+    % Startup coordinator manages the sequenced startup of network services
+    StartupCoordinatorSpec = #{id => startup_coordinator,
+                              start => {startup_coordinator, start_link, []},
+                              restart => permanent,
+                              shutdown => 5000,
+                              type => worker,
+                              modules => [startup_coordinator]},
+    
+    % Services that don't need port management can start normally
+    % Network services (mcp_server, oauth_http_handler, rest_api_server) 
+    % will be started by the startup coordinator after port allocation
     ChildSpecs = [
+        PortManagerSpec,
+        StartupCoordinatorSpec,
+        
+        % Health check server for container deployments
+        #{id => health_check_server,
+          start => {health_check_server, start_link, []},
+          restart => permanent,
+          shutdown => 5000,
+          type => worker,
+          modules => [health_check_server]},
+          
+        % Signal handler for graceful shutdown
+        #{id => signal_handler,
+          start => {signal_handler, start_link, []},
+          restart => permanent,
+          shutdown => 5000,
+          type => worker,
+          modules => [signal_handler]},
+        
         #{id => cluster_manager,
           start => {cluster_manager, start_link, []},
           restart => permanent,
@@ -40,20 +78,6 @@ init([]) ->
           shutdown => 5000,
           type => worker,
           modules => [oauth_server]},
-          
-        #{id => oauth_http_handler,
-          start => {oauth_http_handler, start_link, []},
-          restart => permanent,
-          shutdown => 5000,
-          type => worker,
-          modules => [oauth_http_handler]},
-          
-        #{id => rest_api_server,
-          start => {rest_api_server, start_link, []},
-          restart => permanent,
-          shutdown => 5000,
-          type => worker,
-          modules => [rest_api_server]},
         
         #{id => vector_store_sup,
           start => {vector_store_sup, start_link, []},
@@ -61,13 +85,6 @@ init([]) ->
           shutdown => 5000,
           type => supervisor,
           modules => [vector_store_sup]},
-        
-        #{id => mcp_server,
-          start => {mcp_server, start_link, []},
-          restart => permanent,
-          shutdown => 5000,
-          type => worker,
-          modules => [mcp_server]},
           
         #{id => vector_index_manager,
           start => {vector_index_manager, start_link, []},

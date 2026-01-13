@@ -15,8 +15,20 @@
 -export([start_link/0, handle_request/3]).
 
 start_link() ->
-    Port = application:get_env(erlvectordb, oauth_port, 8081),
-    {ok, spawn_link(fun() -> start_server(Port) end)}.
+    % Get port from port manager instead of direct configuration
+    case port_manager:get_service_port(oauth_server) of
+        {ok, Port} ->
+            {ok, spawn_link(fun() -> start_server(Port) end)};
+        {error, service_not_allocated} ->
+            error_logger:error_msg("OAuth server port not allocated by port manager~n"),
+            {error, port_not_allocated};
+        {error, {service_not_bound, Status}} ->
+            error_logger:error_msg("OAuth server port not bound by port manager, status: ~p~n", [Status]),
+            {error, {port_not_bound, Status}};
+        {error, Reason} ->
+            error_logger:error_msg("OAuth server failed to get port from port manager: ~p~n", [Reason]),
+            {error, {port_manager_error, Reason}}
+    end.
 
 start_server(Port) ->
     case gen_tcp:listen(Port, [binary, {packet, http_bin}, {active, false}, {reuseaddr, true}]) of

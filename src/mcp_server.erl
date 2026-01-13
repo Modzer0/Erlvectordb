@@ -34,13 +34,27 @@ start_link() ->
     gen_server:start_link({local, ?MODULE}, ?MODULE, [], []).
 
 init([]) ->
-    Port = application:get_env(erlvectordb, mcp_port, 8080),
-    case gen_tcp:listen(Port, [binary, {packet, 0}, {active, false}, {reuseaddr, true}]) of
-        {ok, Socket} ->
-            spawn_link(fun() -> accept_loop(Socket) end),
-            {ok, #state{socket = Socket, port = Port}};
+    % Get port from port manager instead of direct configuration
+    case port_manager:get_service_port(mcp_server) of
+        {ok, Port} ->
+            case gen_tcp:listen(Port, [binary, {packet, 0}, {active, false}, {reuseaddr, true}]) of
+                {ok, Socket} ->
+                    spawn_link(fun() -> accept_loop(Socket) end),
+                    error_logger:info_msg("MCP server started on port ~p~n", [Port]),
+                    {ok, #state{socket = Socket, port = Port}};
+                {error, Reason} ->
+                    error_logger:error_msg("MCP server failed to bind to port ~p: ~p~n", [Port, Reason]),
+                    {stop, {bind_failed, Port, Reason}}
+            end;
+        {error, service_not_allocated} ->
+            error_logger:error_msg("MCP server port not allocated by port manager~n"),
+            {stop, port_not_allocated};
+        {error, {service_not_bound, Status}} ->
+            error_logger:error_msg("MCP server port not bound by port manager, status: ~p~n", [Status]),
+            {stop, {port_not_bound, Status}};
         {error, Reason} ->
-            {stop, Reason}
+            error_logger:error_msg("MCP server failed to get port from port manager: ~p~n", [Reason]),
+            {stop, {port_manager_error, Reason}}
     end.
 
 handle_call(_Request, _From, State) ->

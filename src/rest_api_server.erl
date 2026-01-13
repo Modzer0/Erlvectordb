@@ -17,8 +17,20 @@
 start_link() ->
     case application:get_env(erlvectordb, rest_api_enabled, false) of
         true ->
-            Port = application:get_env(erlvectordb, rest_api_port, 8082),
-            {ok, spawn_link(fun() -> start_server(Port) end)};
+            % Get port from port manager instead of direct configuration
+            case port_manager:get_service_port(rest_api_server) of
+                {ok, Port} ->
+                    {ok, spawn_link(fun() -> start_server(Port) end)};
+                {error, service_not_allocated} ->
+                    error_logger:error_msg("REST API server port not allocated by port manager~n"),
+                    {error, port_not_allocated};
+                {error, {service_not_bound, Status}} ->
+                    error_logger:error_msg("REST API server port not bound by port manager, status: ~p~n", [Status]),
+                    {error, {port_not_bound, Status}};
+                {error, Reason} ->
+                    error_logger:error_msg("REST API server failed to get port from port manager: ~p~n", [Reason]),
+                    {error, {port_manager_error, Reason}}
+            end;
         false ->
             ignore
     end.
@@ -94,6 +106,100 @@ recv_body(Socket, Headers) ->
         false ->
             <<>>
     end.
+
+%% Health Check Endpoints (Container Support)
+handle_request('GET', <<"/health">>, _) ->
+    % Basic health check endpoint for container orchestration
+    case health_check_server:get_health_status() of
+        {ok, HealthInfo} ->
+            OverallStatus = maps:get(overall_status, HealthInfo),
+            StatusCode = case OverallStatus of
+                healthy -> 200;
+                degraded -> 200;  % Still OK for basic health check
+                unhealthy -> 503
+            end,
+            
+            Body = jsx:encode(#{
+                <<"status">> => OverallStatus,
+                <<"timestamp">> => maps:get(timestamp, HealthInfo)
+            }),
+            
+            {StatusCode, [
+                {<<"Content-Type">>, <<"application/json">>},
+                {<<"Cache-Control">>, <<"no-cache">>}
+            ], Body};
+        {error, Reason} ->
+            error_response(503, <<"health_check_failed">>, Reason)
+    end;
+
+handle_request('GET', <<"/health/detailed">>, #{client_info := ClientInfo}) ->
+    % Detailed health check endpoint (requires authentication)
+    case check_scope_permission([<<"read">>], ClientInfo) of
+        true ->
+            case health_check_server:get_health_status() of
+                {ok, HealthInfo} ->
+                    OverallStatus = maps:get(overall_status, HealthInfo),
+                    StatusCode = case OverallStatus of
+                        healthy -> 200;
+                        degraded -> 200;
+                        unhealthy -> 503
+                    end,
+                    
+                    Body = jsx:encode(#{
+                        <<"overall_status">> => OverallStatus,
+                        <<"checks">> => format_health_checks(maps:get(checks, HealthInfo, #{})),
+                        <<"timestamp">> => maps:get(timestamp, HealthInfo),
+                        <<"container_mode">> => maps:get(container_mode, HealthInfo, false)
+                    }),
+                    
+                    {StatusCode, [
+                        {<<"Content-Type">>, <<"application/json">>},
+                        {<<"Cache-Control">>, <<"no-cache">>}
+                    ], Body};
+                {error, Reason} ->
+                    error_response(503, <<"health_check_failed">>, Reason)
+            end;
+        false ->
+            error_response(403, <<"insufficient_scope">>, <<"Read scope required">>)
+    end;
+
+handle_request('GET', <<"/ready">>, _) ->
+    % Kubernetes-style readiness probe
+    case application:get_application(erlvectordb) of
+        {ok, _} ->
+            % Check if port manager is ready
+            case port_manager:get_port_status() of
+                {ok, _} ->
+                    Body = jsx:encode(#{
+                        <<"status">> => <<"ready">>,
+                        <<"timestamp">> => erlang:system_time(second)
+                    }),
+                    {200, [
+                        {<<"Content-Type">>, <<"application/json">>},
+                        {<<"Cache-Control">>, <<"no-cache">>}
+                    ], Body};
+                {error, _} ->
+                    Body = jsx:encode(#{
+                        <<"status">> => <<"not_ready">>,
+                        <<"reason">> => <<"port_manager_not_ready">>,
+                        <<"timestamp">> => erlang:system_time(second)
+                    }),
+                    {503, [
+                        {<<"Content-Type">>, <<"application/json">>},
+                        {<<"Cache-Control">>, <<"no-cache">>}
+                    ], Body}
+            end;
+        undefined ->
+            Body = jsx:encode(#{
+                <<"status">> => <<"not_ready">>,
+                <<"reason">> => <<"application_not_running">>,
+                <<"timestamp">> => erlang:system_time(second)
+            }),
+            {503, [
+                {<<"Content-Type">>, <<"application/json">>},
+                {<<"Cache-Control">>, <<"no-cache">>}
+            ], Body}
+    end;
 
 %% Store Management Endpoints
 handle_request('POST', <<"/api/v1/stores">>, #{body := Body, client_info := ClientInfo}) ->
@@ -187,6 +293,24 @@ handle_request('DELETE', Path, #{client_info := ClientInfo}) ->
             error_response(403, <<"insufficient_scope">>, <<"Admin scope required">>)
     end;
 
+%% Port Management Endpoints
+handle_request('GET', <<"/api/v1/ports/status">>, #{client_info := ClientInfo}) ->
+    case check_scope_permission([<<"read">>], ClientInfo) of
+        true ->
+            case port_manager:get_port_status() of
+                {ok, PortStatus} ->
+                    FormattedStatus = format_port_status(PortStatus),
+                    success_response(#{
+                        <<"port_status">> => FormattedStatus,
+                        <<"timestamp">> => erlang:system_time(second)
+                    });
+                {error, Reason} ->
+                    error_response(500, <<"port_status_failed">>, Reason)
+            end;
+        false ->
+            error_response(403, <<"insufficient_scope">>, <<"Read scope required">>)
+    end;
+
 %% Vector Operations
 handle_request('POST', Path, #{body := Body, client_info := ClientInfo}) ->
     case check_scope_permission([<<"write">>], ClientInfo) of
@@ -205,6 +329,8 @@ handle_request('GET', Path, #{client_info := ClientInfo}) ->
     case check_scope_permission([<<"read">>], ClientInfo) of
         true ->
             case binary:split(Path, <<"/">>, [global]) of
+                [<<>>, <<"api">>, <<"v1">>, <<"ports">>, <<"service">>, ServiceName] ->
+                    handle_service_port_query(ServiceName);
                 [<<>>, <<"api">>, <<"v1">>, <<"stores">>, StoreName, <<"search">>] ->
                     % Handle search via query parameters (simplified)
                     error_response(501, <<"not_implemented">>, <<"Use POST for search">>);
@@ -337,6 +463,81 @@ handle_vector_search(StoreName, Body) ->
         _:Error ->
             error_response(400, <<"invalid_request">>, Error)
     end.
+
+handle_service_port_query(ServiceNameBin) ->
+    try
+        ServiceName = binary_to_atom(ServiceNameBin, utf8),
+        case port_manager:get_service_port(ServiceName) of
+            {ok, Port} ->
+                success_response(#{
+                    <<"service">> => ServiceNameBin,
+                    <<"port">> => Port,
+                    <<"status">> => <<"bound">>
+                });
+            {error, service_not_allocated} ->
+                error_response(404, <<"service_not_found">>, 
+                              <<"Service not allocated or does not exist">>);
+            {error, {service_not_bound, Status}} ->
+                success_response(#{
+                    <<"service">> => ServiceNameBin,
+                    <<"port">> => null,
+                    <<"status">> => atom_to_binary(Status, utf8)
+                });
+            {error, Reason} ->
+                error_response(500, <<"service_port_query_failed">>, Reason)
+        end
+    catch
+        error:badarg ->
+            error_response(400, <<"invalid_service_name">>, 
+                          <<"Invalid service name format">>);
+        _:Error ->
+            error_response(500, <<"service_port_query_error">>, Error)
+    end.
+
+format_port_status(PortStatusList) ->
+    [format_single_port_status(PortStatus) || PortStatus <- PortStatusList].
+
+format_single_port_status(PortStatus) ->
+    #{
+        <<"service">> => atom_to_binary(maps:get(service, PortStatus), utf8),
+        <<"port">> => maps:get(port, PortStatus),
+        <<"status">> => atom_to_binary(maps:get(status, PortStatus), utf8),
+        <<"allocated_at">> => maps:get(allocated_at, PortStatus),
+        <<"bind_attempts">> => maps:get(bind_attempts, PortStatus)
+    }.
+
+format_health_checks(HealthChecks) ->
+    maps:fold(fun(CheckName, CheckResult, Acc) ->
+        FormattedResult = #{
+            <<"status">> => atom_to_binary(maps:get(status, CheckResult), utf8),
+            <<"details">> => format_health_check_details(maps:get(details, CheckResult, #{})),
+            <<"duration_us">> => maps:get(duration_us, CheckResult, 0),
+            <<"timestamp">> => maps:get(timestamp, CheckResult, 0)
+        },
+        maps:put(atom_to_binary(CheckName, utf8), FormattedResult, Acc)
+    end, #{}, HealthChecks).
+
+format_health_check_details(Details) when is_map(Details) ->
+    maps:fold(fun(Key, Value, Acc) ->
+        FormattedKey = case is_atom(Key) of
+            true -> atom_to_binary(Key, utf8);
+            false -> Key
+        end,
+        FormattedValue = case is_atom(Value) of
+            true -> atom_to_binary(Value, utf8);
+            false when is_list(Value) ->
+                try
+                    % Try to convert list to binary if it's a string
+                    list_to_binary(Value)
+                catch
+                    _:_ -> Value
+                end;
+            false -> Value
+        end,
+        maps:put(FormattedKey, FormattedValue, Acc)
+    end, #{}, Details);
+format_health_check_details(Details) ->
+    Details.
 
 handle_store_stats(StoreName) ->
     try

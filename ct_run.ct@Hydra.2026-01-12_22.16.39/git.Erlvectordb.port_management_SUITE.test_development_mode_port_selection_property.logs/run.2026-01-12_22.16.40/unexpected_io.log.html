@@ -1,0 +1,103 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN"
+"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en">
+<head>
+<title>Unexpected I/O log</title>
+<meta http-equiv="cache-control" content="no-cache"></meta>
+<meta http-equiv="content-type" content="text/html; charset=utf-8"></meta>
+<link rel="stylesheet" href="../../ct_default.css" type="text/css"></link>
+<script type="text/javascript" src="../../jquery-latest.js"></script>
+<script type="text/javascript" src="../../jquery.tablesorter.min.js"></script>
+</head>
+<body>
+
+<br />
+<h3>Unexpected I/O</h3>
+<pre>
+
+</pre>
+<div class="sasl"><pre><b>*** System report during port_management_SUITE:test_development_mode_port_selection_property/1 2026-01-12 22:16:40.092 ***</b>
+=ERROR REPORT==== 12-Jan-2026::22:16:40.092010 ===
+** Generic server port_manager terminating 
+** Last message in was {'EXIT',&lt;0.145.0&gt;,
+                           {#Ref&lt;0.271869294.3781689345.67699&gt;,12983,ok,
+                            [{port_management_SUITE,
+                                 test_development_mode_port_selection_property}],
+                            []}}
+** When Server state == {state,#{},&lt;0.148.0&gt;,
+                               #{mcp_server =&gt;
+                                     #{description =&gt;
+                                           "Model Context Protocol Server",
+                                       preferred_port =&gt; 9080,
+                                       port_range =&gt; {9080,9099},
+                                       required =&gt; true,
+                                       bind_interface =&gt; "127.0.0.1",
+                                       startup_order =&gt; 1,
+                                       development_mode =&gt; true,
+                                       timeout_ms =&gt; 1500,
+                                       health_check_path =&gt; "/health",
+                                       service_name =&gt; "MCP Server"},
+                                 oauth_server =&gt;
+                                     #{description =&gt;
+                                           "OAuth Authentication Server",
+                                       preferred_port =&gt; 9081,
+                                       port_range =&gt; {9081,9100},
+                                       required =&gt; true,
+                                       bind_interface =&gt; "127.0.0.1",
+                                       startup_order =&gt; 2,
+                                       development_mode =&gt; true,
+                                       timeout_ms =&gt; 1500,
+                                       health_check_path =&gt; "/oauth/health",
+                                       service_name =&gt; "OAuth Server"},
+                                 rest_api_server =&gt;
+                                     #{description =&gt; "RESTful API Server",
+                                       preferred_port =&gt; 9082,
+                                       port_range =&gt; {9082,9101},
+                                       required =&gt; true,
+                                       bind_interface =&gt; "127.0.0.1",
+                                       startup_order =&gt; 3,
+                                       development_mode =&gt; true,
+                                       timeout_ms =&gt; 1500,
+                                       health_check_path =&gt; "/api/health",
+                                       service_name =&gt; "REST API Server"}},
+                               [mcp_server,oauth_server,rest_api_server],
+                               false}
+** Reason for termination ==
+** {#Ref&lt;0.271869294.3781689345.67699&gt;,12983,ok,
+    [{port_management_SUITE,test_development_mode_port_selection_property}],
+    []}
+
+
+</pre></div>
+<pre>
+</pre>
+<div class="sasl"><pre><b>*** System report during port_management_SUITE:test_development_mode_port_selection_property/1 2026-01-12 22:16:40.094 ***</b>
+=ERROR REPORT==== 12-Jan-2026::22:16:40.094859 ===
+** Generic server port_registry terminating 
+** Last message in was {'EXIT',&lt;0.147.0&gt;,
+                           {#Ref&lt;0.271869294.3781689345.67699&gt;,12983,ok,
+                            [{port_management_SUITE,
+                                 test_development_mode_port_selection_property}],
+                            []}}
+** When Server state == {state,#{},[22,23,25,53,80,110,143,443,993,995],#{}}
+** Reason for termination ==
+** {#Ref&lt;0.271869294.3781689345.67699&gt;,12983,ok,
+    [{port_management_SUITE,test_development_mode_port_selection_property}],
+    []}
+
+
+</pre></div>
+<pre>
+</pre>
+<center>
+<br /><hr /><p>
+<a href="../../../all_runs.html">Test run history
+</a>  |  <a href="../../../index.html">Top level test index
+</a>  |  <a href="../../../suite.log.latest.html">Latest test result</a>
+</p>
+<div class="copyright">Copyright &copy; 2026 <a href="http://www.erlang.org">Open Telecom Platform</a><br />
+Updated: <!--date-->Mon Jan 12 2026 22:16:40<!--/date--><br />
+</div>
+</center>
+</body>
+</html>
