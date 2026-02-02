@@ -96,6 +96,8 @@ recv_headers(Socket, Headers) ->
     end.
 
 recv_body(Socket, Headers) ->
+    % Switch to raw mode to read body
+    inet:setopts(Socket, [{packet, raw}]),
     case lists:keyfind('Content-Length', 1, Headers) of
         {'Content-Length', LengthBin} ->
             Length = binary_to_integer(LengthBin),
@@ -604,9 +606,13 @@ cors_response() ->
 
 send_response(Socket, {Status, Headers, Body}) ->
     StatusLine = io_lib:format("HTTP/1.1 ~w ~s\r\n", [Status, status_text(Status)]),
-    HeaderLines = [[atom_to_list(Name), ": ", Value, "\r\n"] || {Name, Value} <- Headers],
+    HeaderLines = [[header_name_to_list(Name), ": ", Value, "\r\n"] || {Name, Value} <- Headers],
     Response = [StatusLine, HeaderLines, "\r\n", Body],
     gen_tcp:send(Socket, Response).
+
+header_name_to_list(Name) when is_atom(Name) -> atom_to_list(Name);
+header_name_to_list(Name) when is_binary(Name) -> binary_to_list(Name);
+header_name_to_list(Name) when is_list(Name) -> Name.
 
 send_error_response(Socket, Status, Error, Message) ->
     Body = jsx:encode(#{<<"error">> => Error, <<"message">> => Message}),

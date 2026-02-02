@@ -80,6 +80,8 @@ recv_headers(Socket, Headers) ->
     end.
 
 recv_body(Socket, Headers) ->
+    % Switch to raw mode to read body
+    inet:setopts(Socket, [{packet, raw}]),
     case lists:keyfind('Content-Length', 1, Headers) of
         {'Content-Length', LengthBin} ->
             Length = binary_to_integer(LengthBin),
@@ -200,9 +202,17 @@ authenticate_request(Headers) ->
 parse_form_data(Body) ->
     Pairs = binary:split(Body, <<"&">>, [global]),
     maps:from_list([begin
-        [Key, Value] = binary:split(Pair, <<"=">>),
-        {http_uri:decode(Key), http_uri:decode(Value)}
-    end || Pair <- Pairs]).
+        case binary:split(Pair, <<"=">>) of
+            [Key, Value] ->
+                % Decode and convert back to binary
+                DecodedKey = list_to_binary(uri_string:percent_decode(binary_to_list(Key))),
+                DecodedValue = list_to_binary(uri_string:percent_decode(binary_to_list(Value))),
+                {DecodedKey, DecodedValue};
+            [Key] ->
+                DecodedKey = list_to_binary(uri_string:percent_decode(binary_to_list(Key))),
+                {DecodedKey, <<>>}
+        end
+    end || Pair <- Pairs, Pair =/= <<>>]).
 
 success_response(Data) ->
     Body = jsx:encode(Data),
@@ -248,9 +258,13 @@ cors_response() ->
 
 send_response(Socket, {Status, Headers, Body}) ->
     StatusLine = io_lib:format("HTTP/1.1 ~w ~s\r\n", [Status, status_text(Status)]),
-    HeaderLines = [[atom_to_list(Name), ": ", Value, "\r\n"] || {Name, Value} <- Headers],
+    HeaderLines = [[header_name_to_list(Name), ": ", Value, "\r\n"] || {Name, Value} <- Headers],
     Response = [StatusLine, HeaderLines, "\r\n", Body],
     gen_tcp:send(Socket, Response).
+
+header_name_to_list(Name) when is_atom(Name) -> atom_to_list(Name);
+header_name_to_list(Name) when is_binary(Name) -> binary_to_list(Name);
+header_name_to_list(Name) when is_list(Name) -> Name.
 
 send_error_response(Socket, Status, Message) ->
     send_response(Socket, {Status, [{<<"Content-Type">>, <<"text/plain">>}], Message}).

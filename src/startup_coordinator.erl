@@ -128,9 +128,29 @@ start_services_sequentially([Service | RestServices]) ->
 start_single_network_service(Service) ->
     error_logger:info_msg("Starting network service: ~p~n", [Service]),
     
-    % Check if service is already running
-    case whereis(Service) of
-        undefined ->
+    % For oauth_server, we need to check if the HTTP handler is listening, not just if the gen_server exists
+    ShouldStart = case Service of
+        oauth_server ->
+            % Check if port is actually listening
+            case port_manager:get_service_port(oauth_server) of
+                {ok, Port} ->
+                    case gen_tcp:connect("127.0.0.1", Port, [binary, {active, false}], 100) of
+                        {ok, Socket} ->
+                            gen_tcp:close(Socket),
+                            false; % Already listening
+                        {error, _} ->
+                            true % Not listening, need to start
+                    end;
+                {error, _} ->
+                    true % Can't check, try to start
+            end;
+        _ ->
+            % For other services, check if process is registered
+            whereis(Service) =:= undefined
+    end,
+    
+    case ShouldStart of
+        true ->
             % Service not running, start it
             case start_service_process(Service) of
                 {ok, Pid} when is_pid(Pid) ->
@@ -152,15 +172,16 @@ start_single_network_service(Service) ->
                     error_logger:error_msg("Failed to start service ~p: ~p~n", [Service, Reason]),
                     {error, {start_failed, Reason}}
             end;
-        Pid when is_pid(Pid) ->
-            error_logger:info_msg("Service ~p already running with PID ~p~n", [Service, Pid]),
+        false ->
+            error_logger:info_msg("Service ~p already running~n", [Service]),
             ok
     end.
 
 start_service_process(mcp_server) ->
     mcp_server:start_link();
 start_service_process(oauth_server) ->
-    % OAuth server is already started by supervisor, we need the HTTP handler
+    % OAuth server gen_server is already started by supervisor
+    % We need to start the HTTP handler
     oauth_http_handler:start_link();
 start_service_process(rest_api_server) ->
     case rest_api_server:start_link() of
