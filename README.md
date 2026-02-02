@@ -36,6 +36,8 @@ erlvectordb_sup (Main Supervisor)
 
 ## Quick Start
 
+> 🚀 **New to ErlVectorDB?** Check out the [Quick Start Guide](QUICKSTART.md) for a 5-minute setup!
+
 ### Prerequisites
 
 - Erlang/OTP 24+
@@ -50,7 +52,34 @@ rebar3 compile
 ### Running
 
 ```bash
+# Quick start with automatic setup
+./start-local.sh
+
+# Or manually
 rebar3 shell
+```
+
+### Managing the Server
+
+```bash
+# Check server status
+./check-status.sh
+
+# Stop the server and cleanup
+./stop-server.sh
+
+# Run automated test suite
+./test_server.sh
+```
+
+### Testing
+
+```bash
+# Run automated test suite
+./test_server.sh
+
+# Run Common Test suites
+rebar3 ct
 ```
 
 ### Basic Usage
@@ -296,12 +325,316 @@ search = client.smart_search('medical AI applications', 'ai_store')
 print(search['explanation'])  # AI explains why results are relevant
 ```
 
+### Gemini CLI Configuration
+
+To use ErlVectorDB with the Gemini CLI, you need to configure it as an MCP server.
+
+#### Step 1: Get Your Gemini API Key
+
+Get your API key from: https://makersuite.google.com/app/apikey
+
+#### Step 2: Configure Gemini CLI
+
+Create or edit your Gemini CLI configuration file:
+
+**Location**: `~/.config/gemini-cli/config.json` (Linux/macOS) or `%USERPROFILE%\.config\gemini-cli\config.json` (Windows)
+
+```json
+{
+  "mcpServers": {
+    "erlvectordb": {
+      "command": "python",
+      "args": ["/path/to/Erlvectordb/examples/gemini_mcp_server.py"],
+      "env": {
+        "ERLVECTORDB_HOST": "localhost",
+        "ERLVECTORDB_PORT": "8080",
+        "ERLVECTORDB_OAUTH_HOST": "localhost",
+        "ERLVECTORDB_OAUTH_PORT": "8081",
+        "ERLVECTORDB_CLIENT_ID": "admin",
+        "ERLVECTORDB_CLIENT_SECRET": "admin_secret_2024"
+      }
+    }
+  }
+}
+```
+
+**Important**: Replace `/path/to/Erlvectordb` with the actual path to your ErlVectorDB installation.
+
+For detailed configuration options, see [Gemini MCP Server Configuration Guide](examples/GEMINI_MCP_SERVER_CONFIG.md).
+
+#### Step 3: Start ErlVectorDB
+
+```bash
+# Using the local starter script (recommended)
+./start-local.sh
+
+# Or manually
+rebar3 shell --eval "application:ensure_all_started(erlvectordb)"
+```
+
+#### Step 4: Use with Gemini CLI
+
+```bash
+# Start Gemini CLI
+gemini-cli
+
+# The ErlVectorDB MCP server will be automatically available
+# You can now use natural language to interact with your vector database:
+
+> "Store this document about machine learning in the database"
+> "Find similar documents about AI"
+> "What documents do I have about healthcare?"
+```
+
+#### Troubleshooting Gemini CLI Connection
+
+If you get "Connection closed" errors:
+
+1. **Verify ErlVectorDB is running**:
+   ```bash
+   ./check-status.sh
+   ```
+
+2. **Test the MCP server directly**:
+   ```bash
+   echo '{"jsonrpc":"2.0","method":"initialize","id":1,"params":{}}' | \
+     python examples/gemini_mcp_server.py
+   ```
+
+3. **Check the logs**:
+   The MCP server logs to stderr, so you can see errors in the Gemini CLI output.
+
+4. **Verify the path in config**:
+   Make sure the path to `gemini_mcp_server.py` is absolute and correct.
+
+5. **Test OAuth connectivity**:
+   ```bash
+   curl -X POST http://localhost:8081/oauth/token \
+     -d "grant_type=client_credentials&client_id=admin&client_secret=admin_secret_2024&scope=read write"
+   ```
+
+6. **Check Python dependencies**:
+   ```bash
+   python3 -c "import requests; print('requests OK')"
+   ```
+
+7. **Enable debug logging**:
+   ```bash
+   export ERLVECTORDB_LOG_LEVEL=DEBUG
+   python examples/gemini_mcp_server.py
+   ```
+
+#### Common Gemini MCP Server Issues
+
+**Issue: "Connection timeout"**
+- Symptom: Server fails to connect to ErlVectorDB
+- Solution: Increase timeout in environment variables:
+  ```bash
+  export ERLVECTORDB_SOCKET_TIMEOUT=60
+  ```
+
+**Issue: "Authentication error"**
+- Symptom: OAuth token acquisition fails
+- Solution: Verify OAuth server is running and credentials are correct:
+  ```bash
+  # Check OAuth server
+  curl http://localhost:8081/oauth/token \
+    -d "grant_type=client_credentials&client_id=admin&client_secret=admin_secret_2024&scope=read write"
+  ```
+
+**Issue: "Parse error"**
+- Symptom: JSON parsing fails
+- Solution: Ensure requests are properly formatted single-line JSON with newlines
+
+**Issue: "Connection closed by remote host"**
+- Symptom: ErlVectorDB closes connection unexpectedly
+- Solution: Check ErlVectorDB logs for errors, verify network connectivity
+
+**Issue: "Incomplete message"**
+- Symptom: Large responses are truncated
+- Solution: Increase buffer size:
+  ```bash
+  export ERLVECTORDB_BUFFER_SIZE=16384
+  ```
+
+#### Gemini MCP Server Configuration Options
+
+The `gemini_mcp_server.py` script supports the following environment variables:
+
+**Connection Settings:**
+- `ERLVECTORDB_HOST` - MCP server host (default: localhost)
+- `ERLVECTORDB_PORT` - MCP server port (default: 8080)
+- `ERLVECTORDB_OAUTH_HOST` - OAuth server host (default: localhost)
+- `ERLVECTORDB_OAUTH_PORT` - OAuth server port (default: 8081)
+
+**Authentication:**
+- `ERLVECTORDB_CLIENT_ID` - OAuth client ID (default: admin)
+- `ERLVECTORDB_CLIENT_SECRET` - OAuth client secret (default: admin_secret_2024)
+
+**Socket Configuration:**
+- `ERLVECTORDB_SOCKET_TIMEOUT` - Socket timeout in seconds (default: 30)
+- `ERLVECTORDB_BUFFER_SIZE` - Socket buffer size in bytes (default: 8192)
+
+**Reconnection Settings:**
+- `ERLVECTORDB_MAX_RECONNECT_ATTEMPTS` - Max reconnection attempts (default: 3)
+- `ERLVECTORDB_RECONNECT_DELAY` - Initial reconnection delay in seconds (default: 1.0)
+
+**OAuth Retry Settings:**
+- `ERLVECTORDB_OAUTH_MAX_RETRIES` - Max OAuth token request retries (default: 3)
+- `ERLVECTORDB_OAUTH_INITIAL_BACKOFF` - Initial backoff delay in seconds (default: 1.0)
+- `ERLVECTORDB_OAUTH_MAX_BACKOFF` - Maximum backoff delay in seconds (default: 30.0)
+- `ERLVECTORDB_OAUTH_BACKOFF_MULTIPLIER` - Backoff multiplier (default: 2.0)
+
+**Logging:**
+- `ERLVECTORDB_LOG_LEVEL` - Log level: DEBUG, INFO, WARNING, ERROR, CRITICAL (default: INFO)
+
+**Example Configuration:**
+```bash
+# High-latency network configuration
+export ERLVECTORDB_SOCKET_TIMEOUT=60
+export ERLVECTORDB_MAX_RECONNECT_ATTEMPTS=5
+export ERLVECTORDB_RECONNECT_DELAY=2.0
+
+# Large message handling
+export ERLVECTORDB_BUFFER_SIZE=32768
+
+# Debug mode
+export ERLVECTORDB_LOG_LEVEL=DEBUG
+
+# Run server
+python examples/gemini_mcp_server.py
+```
+
+#### Gemini MCP Server Usage Examples
+
+**Basic Usage with Gemini CLI:**
+
+Once configured, you can use natural language with Gemini CLI:
+
+```bash
+# Start Gemini CLI
+gemini-cli
+
+# Example interactions:
+> "Create a vector store called 'documents'"
+> "Insert a vector [1.0, 2.0, 3.0] with id 'doc1' into the documents store"
+> "Search for vectors similar to [1.1, 2.1, 3.1] in the documents store"
+> "List all available tools"
+```
+
+**Direct Testing (without Gemini CLI):**
+
+Test the MCP server directly via stdin/stdout:
+
+```bash
+# Test initialize
+echo '{"jsonrpc":"2.0","method":"initialize","id":1,"params":{"protocolVersion":"2024-11-05","capabilities":{"tools":{}}}}' | \
+  python examples/gemini_mcp_server.py
+
+# Test tools/list
+echo '{"jsonrpc":"2.0","method":"tools/list","id":2,"params":{}}' | \
+  python examples/gemini_mcp_server.py
+
+# Test tools/call
+echo '{"jsonrpc":"2.0","method":"tools/call","id":3,"params":{"name":"create_store","arguments":{"name":"test_store"}}}' | \
+  python examples/gemini_mcp_server.py
+```
+
+**Programmatic Usage:**
+
+Use the server components in your own Python code:
+
+```python
+from examples.gemini_mcp_server import MCPServer, ServerConfig
+
+# Create configuration
+config = ServerConfig.from_environment()
+
+# Or customize configuration
+config = ServerConfig(
+    erlvectordb_host='localhost',
+    erlvectordb_port=8080,
+    oauth_host='localhost',
+    oauth_port=8081,
+    client_id='admin',
+    client_secret='admin_secret_2024',
+    socket_timeout=60,
+    log_level='DEBUG'
+)
+
+# Validate configuration
+config.validate()
+
+# Create and run server
+server = MCPServer(config)
+exit_code = server.run()
+```
+
+**Component-Level Usage:**
+
+Use individual components for custom integrations:
+
+```python
+from examples.gemini_mcp_server import (
+    SocketHandler, OAuthManager, RequestRouter, 
+    StdioHandler, ServerConfig
+)
+
+# Create configuration
+config = ServerConfig.from_environment()
+
+# OAuth token management
+oauth_manager = OAuthManager(config)
+token = oauth_manager.get_token()
+print(f"Access token: {token}")
+
+# Socket communication
+socket_handler = SocketHandler(
+    host=config.erlvectordb_host,
+    port=config.erlvectordb_port
+)
+socket_handler.connect()
+
+# Send request
+request = {
+    'jsonrpc': '2.0',
+    'method': 'tools/list',
+    'params': {},
+    'id': 1,
+    'auth': oauth_manager.get_auth_dict()
+}
+socket_handler.send_message(request)
+response = socket_handler.receive_message()
+print(f"Response: {response}")
+
+# Cleanup
+socket_handler.close()
+```
+
+#### Alternative: Direct Python Script
+
+If you prefer to use the Python client directly for demos:
+
+```bash
+# Set environment variables
+export GEMINI_API_KEY='your-gemini-api-key'
+export ERLVECTORDB_HOST='localhost'
+export ERLVECTORDB_PORT='8080'
+export ERLVECTORDB_OAUTH_HOST='localhost'
+export ERLVECTORDB_OAUTH_PORT='8081'
+export ERLVECTORDB_CLIENT_ID='admin'
+export ERLVECTORDB_CLIENT_SECRET='admin_secret_2024'
+
+# Run the demo client (not for Gemini CLI)
+python examples/gemini_mcp_client.py
+```
+
 **Claude Desktop Integration:**
 ```json
 {
   "mcpServers": {
     "erlvectordb-ai": {
-      "command": "python3",
+      "command": "python",
       "args": ["examples/gemini_mcp_client.py"],
       "env": {
         "GEMINI_API_KEY": "${GEMINI_API_KEY}",
@@ -312,8 +645,6 @@ print(search['explanation'])  # AI explains why results are relevant
   }
 }
 ```
-
-Get your Gemini API key from: https://makersuite.google.com/app/apikey
 
 ## MCP Integration
 

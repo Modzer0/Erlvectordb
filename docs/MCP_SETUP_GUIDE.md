@@ -442,7 +442,7 @@ print(search['explanation'])  # AI explains why results are relevant
 {
   "mcpServers": {
     "erlvectordb-gemini": {
-      "command": "python3",
+      "command": "python",
       "args": ["examples/gemini_mcp_client.py"],
       "env": {
         "GEMINI_API_KEY": "${GEMINI_API_KEY}",

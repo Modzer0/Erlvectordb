@@ -8,6 +8,7 @@ _build/
 # Logs
 *.log
 logs/
+startup_*.log
 
 # Data directories
 data/
@@ -19,6 +20,12 @@ test_backups/
 *.tmp
 *.swp
 *~
+
+# Local development files
+start-local.sh.local
+.env
+.env.local
+local_config.sh
 
 # OS generated files
 .DS_Store
